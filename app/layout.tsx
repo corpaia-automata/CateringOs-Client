@@ -23,10 +23,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body
-        className={`${inter.variable} antialiased`}
-        style={{ backgroundColor: '#F8FAFC' }}
-      >
+      <body className={`${inter.variable} font-sans antialiased bg-background`}>
         <Providers>
           {children}
           <Toaster position="top-right" />

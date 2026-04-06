@@ -4,10 +4,10 @@ import { useState, useEffect, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, useRouter } from 'next/navigation';
 import {
-  ArrowLeft, Pencil, MoreHorizontal, Calendar, Phone, Users, IndianRupee,
+  ArrowLeft, Pencil, MoreHorizontal, Phone, Users, IndianRupee,
   Plus, ShoppingCart, FileText, CheckCircle, XCircle, Eye, EyeOff,
   Loader2, Download, Clock, X, Search, ChevronDown, AlertTriangle,
-  ChefHat, Calculator, Trash2, Check,
+  ChefHat, Calculator, Trash2, Check, Mail, CreditCard,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '@/lib/api';
@@ -40,6 +40,10 @@ interface EventDetail {
   created_at: string;
   created_by?: { full_name?: string; email?: string };
   grocery_generated?: boolean;
+  food_cost?: string | number;
+  labor_cost?: string | number;
+  other_costs?: string | number;
+  suggested_price?: string | number;
 }
 
 interface MenuItem {
@@ -144,12 +148,6 @@ const STATUS_STYLE: Record<string, { bg: string; color: string }> = {
   CANCELLED:   { bg: '#FEF2F2', color: '#DC2626' },
 };
 
-const PMT_STYLE: Record<string, { bg: string; color: string }> = {
-  ADVANCE_PAID: { bg: '#EFF6FF', color: '#3B82F6' },
-  PARTIAL:      { bg: '#FFF7ED', color: '#F97316' },
-  PENDING:      { bg: '#FEF2F2', color: '#DC2626' },
-  FULLY_PAID:   { bg: '#ECFDF5', color: '#0D9488' },
-};
 
 function StatusBadge({ value, map }: { value: string; map: Record<string, { bg: string; color: string }> }) {
   const s = map[value] ?? { bg: '#F1F5F9', color: '#64748B' };
@@ -891,7 +889,6 @@ export default function EventDetailPage() {
   const [moreOpen, setMoreOpen] = useState(false);
   const [phoneRevealed, setPhoneRevealed] = useState(false);
   const [cancelConfirm, setCancelConfirm] = useState(false);
-  const [quotationPdfLoading, setQuotationPdfLoading] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
 
   const { data: event, isLoading } = useQuery({
@@ -924,20 +921,6 @@ export default function EventDetailPage() {
     } catch { toast.error('Failed to update event'); }
   }
 
-  async function handleViewQuotation() {
-    if (!event) return;
-    const ec = (event as EventDetail).event_code ?? (event as EventDetail).event_id ?? id;
-    setQuotationPdfLoading(true);
-    try {
-      await api.download(
-        `/events/${id}/quotations/latest/pdf/`,
-        `Afsal-Catering-${ec}.pdf`,
-      );
-      toast.success('Quotation ready');
-    } catch {
-      toast.error('Failed to generate quotation');
-    } finally { setQuotationPdfLoading(false); }
-  }
 
   async function handleGenerateGrocery() {
     try {
@@ -949,6 +932,42 @@ export default function EventDetailPage() {
       toast.error(err?.data?.detail ?? 'Failed to generate grocery list');
     }
   }
+
+  async function handleGenerateQuotation() {
+    try {
+      await api.post(`/events/${id}/quotations/`, {});
+      toast.success('Quotation generated');
+      qc.invalidateQueries({ queryKey: ['quotations', id] });
+    } catch (err: any) {
+      toast.error(err?.data?.detail ?? 'Failed to generate quotation');
+    }
+  }
+
+  async function handleMarkConfirmed() {
+    try {
+      await api.post(`/events/${id}/transition/`, { status: 'CONFIRMED' });
+      toast.success('Event confirmed');
+      qc.invalidateQueries({ queryKey: ['event', id] });
+    } catch (err: any) {
+      toast.error(err?.data?.detail ?? 'Failed to confirm event');
+    }
+  }
+
+  // Hoist menu queries so right sidebar can consume them
+  // (React Query deduplicates — no extra network calls vs MenuTab's own queries)
+  const { data: menuData } = useQuery({
+    queryKey: ['event-menu', id],
+    queryFn: () => api.get(`/events/${id}/menu-items/`),
+    enabled: !!id,
+  });
+  const { data: ingredientsData } = useQuery({
+    queryKey: ['menu-ingredients', id],
+    queryFn: () => api.get(`/events/${id}/menu-items/ingredients/`),
+    enabled: !!id,
+  });
+  const menuItems: MenuItem[] = ((menuData as { results?: MenuItem[] } | null)?.results ?? (menuData as MenuItem[] | null) ?? []);
+  const ingredients: { ingredient_name?: string; name?: string; quantity?: number | string; total_quantity?: number | string; unit?: string }[] =
+    ((ingredientsData as { ingredients?: unknown[] } | null)?.ingredients ?? []) as typeof ingredients;
 
   if (isLoading) {
     return (
@@ -972,11 +991,6 @@ export default function EventDetailPage() {
   const e = event as EventDetail;
   const statusStyle = STATUS_STYLE[e.status] ?? STATUS_STYLE.DRAFT;
 
-  // Payment progress
-  const total = parseFloat(String(e.total_amount ?? 0)) || 0;
-  const advance = parseFloat(String(e.advance_amount ?? 0)) || 0;
-  const payPct = total > 0 ? Math.min(100, Math.round((advance / total) * 100)) : 0;
-
   const TABS: { key: Tab; label: string }[] = [
     { key: 'menu', label: 'Menu' },
     { key: 'notes', label: 'Notes' },
@@ -985,281 +999,418 @@ export default function EventDetailPage() {
   ];
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-6 pb-8">
 
-      {/* ── Top Header ── */}
-      <div className="flex items-start justify-between">
-        <div className="flex items-center gap-3">
-          <button onClick={() => router.back()}
-            className="p-1.5 rounded-lg hover:bg-slate-200 transition-colors">
-            <ArrowLeft size={18} style={{ color: '#64748B' }} />
-          </button>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-xl font-bold" style={{ color: '#0F172A' }}>
-                {e.client_name }-{e.event_type || 'Event'}
+      {/* ── Breadcrumb ── */}
+      <div className="flex items-center gap-2 text-sm text-gray-500">
+        <button
+          onClick={() => router.back()}
+          className="flex items-center gap-1.5 hover:text-gray-700 transition-colors"
+        >
+          <ArrowLeft size={14} /> Events
+        </button>
+        <span className="text-gray-300">/</span>
+        <span className="text-gray-900 font-medium truncate">
+          {e.event_name || `${e.client_name} — ${e.event_type}`}
+        </span>
+      </div>
+
+      {/* ── Command Center: 2-column grid ── */}
+      <div className="grid gap-6 lg:grid-cols-[1fr_320px] items-start">
+
+        {/* ════ LEFT COLUMN ════ */}
+        <div className="flex flex-col gap-5 min-w-0">
+
+          {/* [1+2] Event Header + Financial Summary — combined card */}
+          <div className="rounded-xl border border-gray-200 shadow-sm p-6 bg-white">
+
+            {/* Row 1: Title + Status badge */}
+            <div className="flex items-start justify-between gap-4">
+              <h1 className="text-2xl font-bold text-gray-900 leading-snug">
+                {e.event_name || `${e.client_name} — ${e.event_type}`}
               </h1>
-              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold"
-                style={{ backgroundColor: statusStyle.bg, color: statusStyle.color }}>
+              <span
+                className="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold shrink-0 tracking-wide"
+                style={{ backgroundColor: statusStyle.bg, color: statusStyle.color }}
+              >
                 {e.status.replace(/_/g, ' ')}
               </span>
             </div>
-            <p className="text-sm mt-0.5" style={{ color: '#64748B' }}>{e.venue || 'No venue set'}</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <button onClick={() => setEditOpen(true)}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium"
-            style={{ border: '1.5px solid #E2E8F0', color: '#0F172A', backgroundColor: '#fff' }}>
-            <Pencil size={14} /> Edit Event
-          </button>
-          <div ref={moreRef} className="relative">
-            <button onClick={() => setMoreOpen(v => !v)}
-              className="flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium"
-              style={{ border: '1.5px solid #E2E8F0', color: '#64748B', backgroundColor: '#fff' }}>
-              <MoreHorizontal size={16} />
-            </button>
-            {moreOpen && (
-              <div className="absolute right-0 top-full mt-1 z-20 rounded-lg py-1 min-w-[160px]"
-                style={{ backgroundColor: '#fff', border: '1px solid #E2E8F0', boxShadow: '0 8px 24px rgba(0,0,0,0.1)' }}>
-                <button onClick={() => { /* duplicate logic */ setMoreOpen(false); toast('Duplicate coming soon'); }}
-                  className="flex items-center gap-2 w-full px-3 py-2 text-xs hover:bg-slate-50 transition-colors"
-                  style={{ color: '#64748B' }}>
-                  Duplicate Event
-                </button>
-                <button onClick={() => { setCancelConfirm(true); setMoreOpen(false); }}
-                  className="flex items-center gap-2 w-full px-3 py-2 text-xs hover:bg-red-50 transition-colors"
-                  style={{ color: '#DC2626' }}>
-                  <XCircle size={13} /> Cancel Event
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
 
-      {/* ── Info Bar ── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {/* Date & Time */}
-        <div className="flex items-start gap-3 px-4 py-4 rounded-xl"
-          style={{ backgroundColor: '#fff', border: '1px solid #E2E8F0' }}>
-          <Calendar size={18} style={{ color: '#D95F0E', marginTop: 2 }} />
-          <div>
-            <p className="text-sm mt-1" style={{ color: '#64748B' }}>Date & Time</p>
-            <p className="text-2xl font-semibold mt-0.5" style={{ color: '#0F172A' }}>{fmtDate(e.event_date)}</p>
-            <p className="text-lg" style={{ color: '#94A3B8' }}>
-              {e.event_time ? fmtTime(e.event_time) : ''}
-              {e.event_time && e.event_end_time ? ' – ' : ''}
-              {e.event_end_time ? fmtTime(e.event_end_time) : ''}
+            {/* Row 2: Date · Venue · Guests */}
+            <p className="mt-1.5 text-sm text-gray-500">
+              {fmtDate(e.event_date)}
+              {e.event_time && <span> · {fmtTime(e.event_time)}</span>}
+              {e.venue && <span> · {e.venue}</span>}
+              {e.guest_count && <span> · {e.guest_count} guests</span>}
             </p>
-          </div>
-        </div>
-        {/* Client */}
-        <div className="flex items-start gap-3 px-4 py-4 rounded-xl"
-          style={{ backgroundColor: '#fff', border: '1px solid #E2E8F0' }}>
-          <Phone size={18} style={{ color: '#3B82F6', marginTop: 2 }} />
-          <div>
-            <p className="text-sm mt-1" style={{ color: '#64748B' }}>Client</p>
-            <p className="text-2xl font-semibold mt-0.5" style={{ color: '#0F172A' }}>{e.client_name || '—'}</p>
-            {e.contact_number && (
-              <div className="flex items-center gap-1 mt-0.5">
-                <p className="text-lg font-mono" style={{ color: '#64748B' }}>
-                  {phoneRevealed ? e.contact_number : maskPhone(e.contact_number)}
-                </p>
-                <button onClick={() => setPhoneRevealed(v => !v)} className="p-0.5">
-                  {phoneRevealed ? <EyeOff size={11} style={{ color: '#94A3B8' }} /> : <Eye size={11} style={{ color: '#94A3B8' }} />}
-                </button>
+
+            {/* Divider */}
+            <div className="my-4 h-px bg-gray-100" />
+
+            {/* Row 3: Financial figures */}
+            <div className="flex items-center gap-6 flex-wrap">
+              <div className="flex items-baseline gap-2">
+                <span className="text-xl font-bold text-gray-900">{fmtINR(e.total_amount)}</span>
+                <span className="text-sm text-gray-500">Total</span>
               </div>
-            )}
-          </div>
-        </div>
-        {/* Guests */}
-        <div className="flex items-start gap-3 px-4 py-4 rounded-xl"
-          style={{ backgroundColor: '#fff', border: '1px solid #E2E8F0' }}>
-          <Users size={18} style={{ color: '#0D9488', marginTop: 2 }} />
-          <div>
-            <p className="text-sm mt-1" style={{ color: '#64748B' }}>Total Guests</p>
-            <p className="text-3xl font-bold" style={{ color: '#0F172A' }}>{e.guest_count}</p>
-            {/* <p className="text-xs" style={{ color: '#94A3B8' }}>Confirmed</p> */}
-          </div>
-        </div>
-        {/* Amount */}
-        <div className="flex items-start gap-3 px-4 py-4 rounded-xl"
-          style={{ backgroundColor: '#fff', border: '1px solid #E2E8F0' }}>
-          <IndianRupee size={18} style={{ color: '#16A34A', marginTop: 2 }} />
-          <div>
-            <p className="text-sm mt-1" style={{ color: '#64748B' }}>Total Amount</p>
-            <p className="text-3xl font-bold" style={{ color: '#0F172A' }}>{fmtINR(e.total_amount)}</p>
-            <p className="text-xs" style={{ color: '#94A3B8' }}>
-              {/* Advance: <span style={{ color: '#3B82F6' }}>{fmtINR(e.advance_amount)}</span> */}
-            </p>
-          </div>
-        </div>
-      </div>
+              <div className="flex items-baseline gap-2">
+                <span className="text-xl font-bold text-gray-900">{fmtINR(e.advance_amount)}</span>
+                <span className="text-sm text-gray-500">Paid</span>
+              </div>
+              <div className="flex items-baseline gap-2">
+                <span className="text-xl font-bold text-red-500">{fmtINR(e.balance_amount)}</span>
+                <span className="text-sm text-red-400">Pending</span>
+              </div>
+              {e.contact_number && (
+                <div className="ml-auto">
+                  <button
+                    onClick={() => setPhoneRevealed(v => !v)}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 text-xs transition-colors"
+                  >
+                    <Phone size={13} />
+                    <span className="font-mono">
+                      {phoneRevealed ? e.contact_number : maskPhone(e.contact_number)}
+                    </span>
+                    {phoneRevealed
+                      ? <EyeOff size={11} className="text-gray-400" />
+                      : <Eye size={11} className="text-gray-400" />}
+                  </button>
+                </div>
+              )}
+            </div>
 
-      {/* ── Main 60/40 Layout ── */}
-      <div className="flex flex-col xl:flex-row gap-5">
-
-        {/* LEFT — Tabbed Panel */}
-        <div className="flex-1 rounded-xl overflow-hidden"
-          style={{ backgroundColor: '#fff', border: '1px solid #E2E8F0', minWidth: 0 }}>
-          {/* Tab Headers */}
-          <div className="flex border-b" style={{ borderColor: '#E2E8F0' }}>
-            {TABS.map(tab => (
-              <button key={tab.key} onClick={() => setActiveTab(tab.key)}
-                className="px-5 py-3.5 text-sm font-medium transition-colors relative"
-                style={{ color: activeTab === tab.key ? '#D95F0E' : '#64748B' }}>
-                {tab.label}
-                {activeTab === tab.key && (
-                  <div className="absolute bottom-0 left-0 right-0 h-0.5 rounded-t-full" style={{ backgroundColor: '#D95F0E' }} />
+            {/* Row 4: Action buttons */}
+            <div className="flex items-center gap-2 mt-4 flex-wrap">
+              <button
+                onClick={handleMarkConfirmed}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold bg-green-600 text-white hover:bg-green-700 transition-colors"
+              >
+                <Check size={15} /> Mark Confirmed
+              </button>
+              <button className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold bg-indigo-600 text-white hover:bg-indigo-700 transition-colors">
+                <CreditCard size={15} /> Add Payment
+              </button>
+              <button className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border border-gray-200 text-gray-700 hover:bg-gray-50 transition-colors">
+                <Mail size={15} /> Send Reminder
+              </button>
+              <button
+                onClick={() => setEditOpen(true)}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border border-gray-200 text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                <Users size={15} /> Assign Staff
+              </button>
+              <div ref={moreRef} className="relative ml-auto">
+                <button
+                  onClick={() => setMoreOpen(v => !v)}
+                  className="flex items-center px-2.5 py-2 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 transition-colors"
+                >
+                  <MoreHorizontal size={16} />
+                </button>
+                {moreOpen && (
+                  <div className="absolute right-0 top-full mt-1 z-20 rounded-lg py-1 min-w-[160px] bg-white border border-gray-200 shadow-lg">
+                    <button
+                      onClick={() => { setEditOpen(true); setMoreOpen(false); }}
+                      className="flex items-center gap-2 w-full px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 transition-colors"
+                    >
+                      <Pencil size={13} /> Edit Event
+                    </button>
+                    <button
+                      onClick={() => { setMoreOpen(false); toast('Duplicate coming soon'); }}
+                      className="flex items-center gap-2 w-full px-3 py-2 text-xs text-gray-500 hover:bg-gray-50 transition-colors"
+                    >
+                      Duplicate Event
+                    </button>
+                    <button
+                      onClick={() => { setCancelConfirm(true); setMoreOpen(false); }}
+                      className="flex items-center gap-2 w-full px-3 py-2 text-xs text-red-600 hover:bg-red-50 transition-colors"
+                    >
+                      <XCircle size={13} /> Cancel Event
+                    </button>
+                  </div>
                 )}
-              </button>
-            ))}
+              </div>
+            </div>
           </div>
-          {/* Tab Content */}
-          <div className="p-5">
-            {activeTab === 'menu' && <MenuTab eventId={id} />}
-            {activeTab === 'notes' && <NotesTab event={e} onSaved={() => qc.invalidateQueries({ queryKey: ['event', id] })} />}
-            {activeTab === 'quotation' && <QuotationTab eventId={id} eventCode={e.event_code ?? e.event_id ?? id} />}
-            {activeTab === 'activity' && <ActivityTab eventId={id} />}
+
+          {/* [3] Tabbed Detail Panel */}
+          <div className="rounded-xl border border-gray-200 shadow-sm bg-white overflow-hidden">
+            <div className="flex border-b border-gray-200">
+              {TABS.map(tab => (
+                <button
+                  key={tab.key}
+                  onClick={() => setActiveTab(tab.key)}
+                  className="px-5 py-3.5 text-sm font-medium transition-colors relative"
+                  style={{ color: activeTab === tab.key ? '#D95F0E' : '#64748B' }}
+                >
+                  {tab.label}
+                  {activeTab === tab.key && (
+                    <div
+                      className="absolute bottom-0 left-0 right-0 h-0.5 rounded-t-full"
+                      style={{ backgroundColor: '#D95F0E' }}
+                    />
+                  )}
+                </button>
+              ))}
+            </div>
+            <div className="p-5">
+              {activeTab === 'menu'      && <MenuTab eventId={id} />}
+              {activeTab === 'notes'     && <NotesTab event={e} onSaved={() => qc.invalidateQueries({ queryKey: ['event', id] })} />}
+              {activeTab === 'quotation' && <QuotationTab eventId={id} eventCode={e.event_code ?? e.event_id ?? id} />}
+              {activeTab === 'activity'  && <ActivityTab eventId={id} />}
+            </div>
           </div>
         </div>
 
-        {/* RIGHT — Status Panel */}
-        <div className="xl:w-80 flex flex-col gap-4">
+        {/* ════ RIGHT COLUMN (sticky) ════ */}
+        <div className="flex flex-col gap-4 lg:sticky lg:top-6">
 
-          {/* Event Status + Payment */}
-          <div className="rounded-xl p-5" style={{ backgroundColor: '#fff', border: '1px solid #E2E8F0' }}>
-            <h3 className="text-sm font-semibold mb-3" style={{ color: '#0F172A' }}>Event Status</h3>
-            {/* Payment progress */}
-            <div className="mb-3">
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-xs" style={{ color: '#64748B' }}>Payment Progress</span>
-                <span className="text-xs font-semibold" style={{ color: '#0F172A' }}>{payPct}% paid</span>
-              </div>
-              <div className="h-2 rounded-full overflow-hidden" style={{ backgroundColor: '#F1F5F9' }}>
-                <div className="h-full rounded-full transition-all"
-                  style={{ width: `${payPct}%`, backgroundColor: payPct === 100 ? '#0D9488' : payPct >= 50 ? '#3B82F6' : '#F97316' }} />
-              </div>
-              <div className="flex justify-between mt-1">
-                <span className="text-xs" style={{ color: '#94A3B8' }}>Paid: {fmtINR(e.advance_amount)}</span>
-                <span className="text-xs" style={{ color: '#94A3B8' }}>Balance: {fmtINR(e.balance_amount)}</span>
-              </div>
+          {/* [4] Menu & Costing */}
+          <div className="rounded-xl border border-gray-200 shadow-sm p-4 bg-white">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-gray-900">Menu & Costing</h3>
+              <button
+                onClick={() => setActiveTab('menu')}
+                className="text-xs font-medium text-teal-600 hover:text-teal-700 transition-colors"
+              >
+                Edit Menu
+              </button>
             </div>
 
-            {/* Payment status badge */}
-            {e.payment_status && (
-              <div className="flex items-center justify-between">
-                <span className="text-xs" style={{ color: '#64748B' }}>Payment Status</span>
-                <StatusBadge value={e.payment_status} map={PMT_STYLE} />
-              </div>
+            {menuItems.length === 0 ? (
+              <p className="text-xs text-gray-400 py-4 text-center">No dishes added yet</p>
+            ) : (
+              <>
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-gray-100">
+                      {['Name', 'Qty', 'Cost', 'Total'].map(h => (
+                        <th
+                          key={h}
+                          className="text-left text-[10px] font-semibold text-gray-400 uppercase tracking-wide pb-2"
+                        >
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {menuItems.slice(0, 4).map((item: MenuItem) => (
+                      <tr key={item.id} className="border-b border-gray-50 last:border-0">
+                        <td className="py-2 pr-2">
+                          <p className="text-xs font-medium text-gray-900 truncate max-w-[90px]">
+                            {item.dish_name_snapshot}
+                          </p>
+                        </td>
+                        <td className="py-2 pr-2 text-xs text-gray-500">{item.quantity}</td>
+                        <td className="py-2 pr-2 text-xs text-gray-400">—</td>
+                        <td className="py-2 text-xs text-gray-400">—</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {menuItems.length > 4 && (
+                  <p className="text-[11px] text-gray-400 mt-1.5">
+                    +{menuItems.length - 4} more dishes
+                  </p>
+                )}
+
+                {/* Cost breakdown */}
+                <div className="mt-3 pt-3 border-t border-gray-100 flex flex-col gap-2">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-gray-500">Food Cost</span>
+                    <span className="text-xs font-semibold text-gray-900">{fmtINR(e.food_cost)}</span>
+                  </div>
+                  {(() => {
+                    const tAmt = parseFloat(String(e.total_amount ?? 0));
+                    const fCost = parseFloat(String(e.food_cost ?? 0));
+                    const profit = tAmt > 0 && fCost > 0 ? tAmt - fCost : null;
+                    return (
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs text-gray-500">Estimated Profit</span>
+                        <span className="text-xs font-semibold text-green-600">
+                          {profit !== null ? fmtINR(profit) : '—'}
+                        </span>
+                      </div>
+                    );
+                  })()}
+                  <div className="flex justify-between items-center pt-2 border-t border-gray-100">
+                    <span className="text-xs font-bold text-gray-900">Total</span>
+                    <span className="text-sm font-bold text-gray-900">{fmtINR(e.total_amount)}</span>
+                  </div>
+                </div>
+              </>
             )}
+          </div>
 
-            {/* Grocery status */}
-            <div className="flex items-center justify-between mt-3">
-              <span className="text-xs" style={{ color: '#64748B' }}>Grocery List</span>
-              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold"
+          {/* [5] Grocery Status */}
+          {/* <div className="rounded-xl border border-gray-200 shadow-sm p-4 bg-white">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-gray-900">Grocery Status</h3>
+              <MoreHorizontal size={15} className="text-gray-400" />
+            </div>
+
+            {e.grocery_generated ? (
+              <>
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="w-2 h-2 rounded-full bg-green-500 shrink-0" />
+                  <span className="text-xs font-semibold text-green-600">Generated</span>
+                </div>
+                {ingredients.slice(0, 2).map((ing, i) => {
+                  const qty = Number(ing.quantity ?? ing.total_quantity ?? 0);
+                  const fmt = formatQty(qty, ing.unit ?? '');
+                  return (
+                    <div key={i} className="flex justify-between items-center py-1.5 border-b border-gray-50 last:border-0">
+                      <span className="text-xs text-gray-600 capitalize">
+                        {ing.ingredient_name ?? ing.name}
+                      </span>
+                      <span className="text-xs text-gray-500">{fmt.value} {fmt.unit}</span>
+                    </div>
+                  );
+                })}
+                <div className="flex gap-2 mt-3">
+                  <button
+                    onClick={handleGenerateGrocery}
+                    className="flex-1 py-2 text-xs font-medium rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    Generate List
+                  </button>
+                  <button className="flex-1 py-2 text-xs font-semibold rounded-lg bg-green-600 text-white hover:bg-green-700 transition-colors">
+                    Send Reminder
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="w-2 h-2 rounded-full bg-gray-300 shrink-0" />
+                  <span className="text-xs text-gray-400">Not generated yet</span>
+                </div>
+                <button
+                  onClick={handleGenerateGrocery}
+                  className="w-full py-2.5 text-xs font-semibold rounded-lg bg-green-600 text-white hover:bg-green-700 transition-colors"
+                >
+                  Generate List
+                </button>
+              </>
+            )}
+          </div> */}
+
+          {/* [6] Quick Actions */}
+          <div className="rounded-xl border border-gray-200 shadow-sm p-4 bg-white">
+            <h3 className="text-sm font-semibold text-gray-900 mb-3">Quick Actions</h3>
+            <div className="grid grid-cols-2 gap-2.5">
+
+              {/* Generate Quotation */}
+              <button
+                onClick={handleGenerateQuotation}
+                className="flex flex-col items-center gap-2 rounded-xl py-4 px-2 transition-all hover:opacity-90 active:scale-95"
+                style={{ backgroundColor: '#0D9488' }}
+              >
+                <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-white/20">
+                  <FileText size={17} color="#fff" />
+                </div>
+                <span className="text-xs font-semibold text-center leading-tight text-white">
+                  Generate Quotation
+                </span>
+              </button>
+
+              {/* Generate Grocery */}
+              <button
+                onClick={handleGenerateGrocery}
+                className="flex flex-col items-center gap-2 rounded-xl py-4 px-2 border border-gray-200 hover:bg-gray-50 transition-all active:scale-95"
+              >
+                <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-indigo-50">
+                  <ShoppingCart size={17} className="text-indigo-500" />
+                </div>
+                <span className="text-xs font-semibold text-center leading-tight text-gray-700">
+                  Generate Grocery
+                </span>
+              </button>
+
+              {/* Payment */}
+              <button className="flex flex-col items-center gap-2 rounded-xl py-4 px-2 border border-gray-200 hover:bg-gray-50 transition-all active:scale-95">
+                <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-blue-50">
+                  <IndianRupee size={17} className="text-blue-500" />
+                </div>
+                <span className="text-xs font-semibold text-center leading-tight text-gray-700">
+                  Payment
+                </span>
+              </button>
+
+              {/* Mark as Completed */}
+              <button
+                onClick={e.status !== 'COMPLETED' && e.status !== 'CANCELLED' ? handleMarkComplete : undefined}
+                className="flex flex-col items-center gap-2 rounded-xl py-4 px-2 border border-gray-200 hover:bg-gray-50 transition-all active:scale-95"
                 style={{
-                  backgroundColor: e.grocery_generated ? '#ECFDF5' : '#F1F5F9',
-                  color: e.grocery_generated ? '#0D9488' : '#64748B',
-                }}>
-                {e.grocery_generated ? 'Generated' : 'Not Generated'}
-              </span>
-            </div>
-          </div>
-
-          {/* Guest Count */}
-          <div className="rounded-xl px-5 py-4 flex items-center gap-3"
-            style={{ backgroundColor: '#fff', border: '1px solid #E2E8F0' }}>
-            <Users size={20} style={{ color: '#0D9488' }} />
-            <div>
-              <p className="text-xs" style={{ color: '#64748B' }}>Confirmed Guests</p>
-              <p className="text-2xl font-bold" style={{ color: '#0F172A' }}>{e.guest_count}</p>
-            </div>
-            <div className="ml-auto">
-              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold"
-                style={{ backgroundColor: '#ECFDF5', color: '#0D9488' }}>Confirmed</span>
-            </div>
-          </div>
-
-          {/* Quick Actions */}
-          <div className="rounded-xl p-5" style={{ backgroundColor: '#fff', border: '1px solid #E2E8F0' }}>
-            <h3 className="text-sm font-semibold mb-3" style={{ color: '#0F172A' }}>Quick Actions</h3>
-            <div className="flex flex-col gap-2">
-              <button onClick={handleViewQuotation} disabled={quotationPdfLoading}
-                className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors hover:bg-slate-50"
-                style={{ border: '1px solid #E2E8F0', color: '#0F172A', opacity: quotationPdfLoading ? 0.7 : 1 }}>
-                {quotationPdfLoading
-                  ? <Loader2 size={15} className="animate-spin" style={{ color: '#64748B' }} />
-                  : <FileText size={15} style={{ color: '#64748B' }} />}
-                {quotationPdfLoading ? 'Preparing quotation…' : 'View Quotation'}
-                {!quotationPdfLoading && <span className="ml-auto" style={{ color: '#94A3B8' }}>→</span>}
+                  opacity: e.status === 'COMPLETED' || e.status === 'CANCELLED' ? 0.4 : 1,
+                  cursor: e.status === 'COMPLETED' || e.status === 'CANCELLED' ? 'not-allowed' : 'pointer',
+                }}
+              >
+                <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-green-50">
+                  <CheckCircle size={17} className="text-green-600" />
+                </div>
+                <span className="text-xs font-semibold text-center leading-tight text-gray-700">
+                  Mark as Completed
+                </span>
               </button>
-              <button onClick={handleGenerateGrocery}
-                className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors hover:bg-teal-50"
-                style={{ border: '1px solid #E2E8F0', color: '#0D9488' }}>
-                <ShoppingCart size={15} /> Generate Grocery
-                <span className="ml-auto" style={{ color: '#94A3B8' }}>→</span>
-              </button>
-              {e.status !== 'COMPLETED' && e.status !== 'CANCELLED' && (
-                <button onClick={handleMarkComplete}
-                  className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors hover:bg-green-50"
-                  style={{ border: '1px solid #E2E8F0', color: '#16A34A' }}>
-                  <CheckCircle size={15} /> Mark as Completed
-                  <span className="ml-auto" style={{ color: '#94A3B8' }}>→</span>
-                </button>
-              )}
-              {e.status !== 'CANCELLED' && (
-                <button onClick={() => setCancelConfirm(true)}
-                  className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors hover:bg-red-50"
-                  style={{ border: '1px solid #E2E8F0', color: '#DC2626' }}>
-                  <XCircle size={15} /> Cancel Event
-                  <span className="ml-auto" style={{ color: '#94A3B8' }}>→</span>
-                </button>
-              )}
             </div>
+
+            {/* Cancel Event */}
+            {e.status !== 'CANCELLED' && (
+              <button
+                onClick={() => setCancelConfirm(true)}
+                className="mt-2.5 w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium border border-red-200 text-red-600 hover:bg-red-50 transition-colors"
+              >
+                <XCircle size={14} /> Cancel Event
+              </button>
+            )}
           </div>
 
           {/* Created info */}
-          <div className="rounded-xl px-5 py-4" style={{ backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0' }}>
-            <p className="text-xs" style={{ color: '#94A3B8' }}>
-              Created by <span style={{ color: '#64748B', fontWeight: 500 }}>
+          <div className="rounded-xl px-4 py-3 bg-gray-50 border border-gray-200">
+            <p className="text-xs text-gray-400">
+              Created by{' '}
+              <span className="text-gray-600 font-medium">
                 {e.created_by?.full_name ?? e.created_by?.email ?? 'System'}
               </span>
             </p>
-            <p className="text-xs mt-0.5" style={{ color: '#94A3B8' }}>{fmtDate(e.created_at)}</p>
+            <p className="text-xs text-gray-400 mt-0.5">{fmtDate(e.created_at)}</p>
           </div>
         </div>
       </div>
 
-      {/* ── Drawers & Modals ── */}
+      {/* ── Overlays ── */}
       <EditEventDrawer
-        event={e} open={editOpen} onClose={() => setEditOpen(false)}
-        onSaved={() => qc.invalidateQueries({ queryKey: ['event', id] })} />
+        event={e}
+        open={editOpen}
+        onClose={() => setEditOpen(false)}
+        onSaved={() => qc.invalidateQueries({ queryKey: ['event', id] })}
+      />
 
-      {/* Cancel Confirm Dialog */}
       {cancelConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{ backgroundColor: 'rgba(15,23,42,0.5)' }}>
-          <div className="rounded-xl p-6 max-w-sm w-full" style={{ backgroundColor: '#fff', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50">
+          <div className="rounded-xl p-6 max-w-sm w-full bg-white shadow-2xl">
             <div className="flex items-center gap-3 mb-3">
-              <div className="flex items-center justify-center w-10 h-10 rounded-full" style={{ backgroundColor: '#FEF2F2' }}>
-                <AlertTriangle size={20} style={{ color: '#DC2626' }} />
+              <div className="flex items-center justify-center w-10 h-10 rounded-full bg-red-50">
+                <AlertTriangle size={20} className="text-red-600" />
               </div>
-              <h3 className="font-semibold" style={{ color: '#0F172A' }}>Cancel Event?</h3>
+              <h3 className="font-semibold text-gray-900">Cancel Event?</h3>
             </div>
-            <p className="text-sm mb-5" style={{ color: '#64748B' }}>
+            <p className="text-sm text-gray-500 mb-5">
               This will mark the event as cancelled. This action cannot be easily undone.
             </p>
             <div className="flex gap-3">
-              <button onClick={() => setCancelConfirm(false)}
-                className="flex-1 px-4 py-2 rounded-lg text-sm font-medium"
-                style={{ border: '1px solid #E2E8F0', color: '#64748B' }}>
+              <button
+                onClick={() => setCancelConfirm(false)}
+                className="flex-1 px-4 py-2 rounded-lg text-sm font-medium border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors"
+              >
                 Keep Event
               </button>
-              <button onClick={handleCancel}
-                className="flex-1 px-4 py-2 rounded-lg text-sm font-semibold text-white"
-                style={{ backgroundColor: '#DC2626' }}>
+              <button
+                onClick={handleCancel}
+                className="flex-1 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-red-600 hover:bg-red-700 transition-colors"
+              >
                 Cancel Event
               </button>
             </div>

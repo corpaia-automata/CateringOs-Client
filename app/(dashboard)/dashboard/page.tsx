@@ -4,11 +4,11 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import {
-  Users, Calendar, IndianRupee, AlertCircle,
-  ArrowRight, TrendingUp, UtensilsCrossed,
+  Users, Calendar, IndianRupee, Clock,
+  TrendingUp, TrendingDown, UtensilsCrossed, ChevronDown,
 } from 'lucide-react';
 import {
-  AreaChart, Area, BarChart, Bar, Cell,
+  LineChart, Line, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
 import { api } from '@/lib/api';
@@ -18,30 +18,30 @@ import Link from 'next/link';
 // ─── Placeholder data ─────────────────────────────────────────────────────────
 
 const REVENUE_PLACEHOLDER = [
-  { label: 'Oct', revenue: 45000 },
-  { label: 'Nov', revenue: 62000 },
-  { label: 'Dec', revenue: 38000 },
-  { label: 'Jan', revenue: 71000 },
-  { label: 'Feb', revenue: 55000 },
-  { label: 'Mar', revenue: 80000 },
+  { label: 'Mon', revenue: 4000 },
+  { label: 'Tue', revenue: 3000 },
+  { label: 'Wed', revenue: 2000 },
+  { label: 'Thu', revenue: 2800 },
+  { label: 'Fri', revenue: 1900 },
+  { label: 'Sat', revenue: 2400 },
+  { label: 'Sun', revenue: 3500 },
 ];
 
 const EVENTS_DAY_PLACEHOLDER = [
-  { label: 'Mon', count: 1 },
-  { label: 'Tue', count: 0 },
-  { label: 'Wed', count: 2 },
-  { label: 'Thu', count: 1 },
-  { label: 'Fri', count: 3 },
-  { label: 'Sat', count: 2 },
-  { label: 'Sun', count: 1 },
+  { label: 'Mon', count: 2 },
+  { label: 'Tue', count: 1 },
+  { label: 'Wed', count: 3 },
+  { label: 'Thu', count: 2 },
+  { label: 'Fri', count: 4 },
+  { label: 'Sat', count: 6 },
+  { label: 'Sun', count: 5 },
 ];
 
 const DISHES_PLACEHOLDER = [
-  { dish_name: 'Chicken Biryani', total_quantity: 1800 },
-  { dish_name: 'Mutton Curry',    total_quantity: 1300 },
-  { dish_name: 'Ghee Rice',       total_quantity: 900  },
-  { dish_name: 'Raita',           total_quantity: 600  },
-  { dish_name: 'Papad',           total_quantity: 400  },
+  { dish_name: 'Chicken Biryani', total_quantity: 124, total_revenue: 45000 },
+  { dish_name: 'Mutton Rogan Josh', total_quantity: 89, total_revenue: 67000 },
+  { dish_name: 'Paneer Butter Masala', total_quantity: 76, total_revenue: 22000 },
+  { dish_name: 'Veg Pulao', total_quantity: 65, total_revenue: 15000 },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -112,57 +112,78 @@ type KpiCardProps = {
   icon: React.ReactNode;
   iconBg: string;
   iconColor: string;
-  glowColor: string;
   href: string;
+  subtitle: string;
+  subtitleIcon: React.ReactNode;
+  subtitleColor: string;
   loading?: boolean;
 };
 
 function KpiCard({
-  title, value, icon, iconBg, iconColor, glowColor, href, loading,
+  title, value, icon, iconBg, iconColor, href, subtitle, subtitleIcon, subtitleColor, loading,
 }: KpiCardProps) {
   const router = useRouter();
   return (
     <div
       onClick={() => router.push(href)}
-      className="group cursor-pointer rounded-2xl px-5 py-4 flex flex-col gap-3 transition-all duration-200 hover:-translate-y-0.5"
+      className="group cursor-pointer rounded-2xl p-5 flex flex-col gap-3 transition-all duration-200 hover:-translate-y-0.5"
       style={{
         background: '#ffffff',
         boxShadow: '0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.06)',
         border: '1px solid rgba(226,232,240,0.8)',
       }}
     >
-      {/* Row 1: Icon + Label */}
-      <div className="flex items-center gap-2.5">
+      {/* Top row: icon + menu */}
+      <div className="flex items-start justify-between">
         <div
           className="flex items-center justify-center rounded-xl shrink-0 transition-all duration-200 group-hover:scale-110"
           style={{
-            width: 32,
-            height: 32,
+            width: 36,
+            height: 36,
             background: iconBg,
-            boxShadow: `0 0 0 3px ${glowColor}`,
           }}
         >
           <span style={{ color: iconColor }}>{icon}</span>
         </div>
-        <p
-          className="font-medium tracking-wide uppercase truncate"
-          style={{ fontSize: 11, color: '#94A3B8', letterSpacing: '0.06em' }}
+        <button
+          onClick={e => e.stopPropagation()}
+          className="flex items-center gap-0.5 rounded-md px-1 py-0.5 hover:bg-slate-100 transition-colors"
+          style={{ color: '#CBD5E1' }}
+          aria-label="More options"
         >
-          {title}
-        </p>
+          <span style={{ fontSize: 16, letterSpacing: 1, lineHeight: 1 }}>···</span>
+        </button>
       </div>
 
-      {/* Row 2: Value */}
+      {/* Title */}
+      <p
+        className="font-semibold uppercase tracking-wider"
+        style={{ fontSize: 10.5, color: '#94A3B8', letterSpacing: '0.08em' }}
+      >
+        {title}
+      </p>
+
+      {/* Value */}
       {loading ? (
         <Skeleton className="h-8 w-28" />
       ) : (
         <p
-          className="font-bold tracking-tight"
-          style={{ fontSize: 26, color: '#0F172A', lineHeight: 1.1 }}
+          className="font-extrabold tracking-tight"
+          style={{ fontSize: 28, color: '#0F172A', lineHeight: 1 }}
         >
           {value}
         </p>
       )}
+
+      {/* Subtitle */}
+      <div className="flex items-center gap-1.5">
+        <span style={{ color: subtitleColor, display: 'flex', alignItems: 'center' }}>
+          {subtitleIcon}
+        </span>
+        <span style={{ fontSize: 12, color: subtitleColor, fontWeight: 500 }}>
+          {subtitle}
+        </span>
+      </div>
     </div>
   );
 }
@@ -171,10 +192,13 @@ function KpiCard({
 
 const STATUS_STYLE: Record<string, { bg: string; color: string; dot: string }> = {
   CONFIRMED:   { bg: '#ECFDF5', color: '#059669', dot: '#10B981' },
+  PAID:        { bg: '#ECFDF5', color: '#059669', dot: '#10B981' },
   DRAFT:       { bg: '#F8FAFC', color: '#64748B', dot: '#94A3B8' },
   IN_PROGRESS: { bg: '#FFFBEB', color: '#D97706', dot: '#F59E0B' },
+  PARTIAL:     { bg: '#FFF7ED', color: '#EA580C', dot: '#F97316' },
   COMPLETED:   { bg: '#F0FDF4', color: '#166534', dot: '#22C55E' },
   CANCELLED:   { bg: '#FFF1F2', color: '#BE123C', dot: '#F43F5E' },
+  PENDING:     { bg: '#FFF1F2', color: '#BE123C', dot: '#F43F5E' },
 };
 
 function StatusBadge({ value }: { value: string }) {
@@ -211,11 +235,9 @@ function Card({ children, className = '' }: { children: React.ReactNode; classNa
 
 // ─── Dashboard Page ───────────────────────────────────────────────────────────
 
-type EventFilter = 'today' | 'next7' | 'weekly';
 type RevenueRange = 'daily' | 'weekly' | 'monthly';
 
 export default function DashboardPage() {
-  const [eventFilter, setEventFilter] = useState<EventFilter>('next7');
   const [revenueRange, setRevenueRange] = useState<RevenueRange>('weekly');
 
   // ── Queries ──
@@ -236,8 +258,8 @@ export default function DashboardPage() {
   });
 
   const { data: upcomingEvents, isLoading: upcomingLoading } = useQuery({
-    queryKey: ['upcoming-events', eventFilter],
-    queryFn: () => api.get(`/events/?upcoming=true&filter=${eventFilter}`),
+    queryKey: ['upcoming-events'],
+    queryFn: () => api.get('/events/?upcoming=true&filter=next7'),
   });
 
   const { data: revenueData, isLoading: revenueLoading } = useQuery({
@@ -271,14 +293,13 @@ export default function DashboardPage() {
   const isDishesSample = !rawDishes?.length;
   const dishes = rawDishes?.length ? rawDishes : DISHES_PLACEHOLDER;
 
-  const maxQty = dishes.length > 0 ? Math.max(...dishes.map((d: any) => d.total_quantity)) : 1;
-
-  const todayLabel = new Date().toLocaleDateString('en-US', { weekday: 'short' }).slice(0, 3);
-
   // ── Render ──
 
   return (
     <div className="flex flex-col gap-6 pb-8">
+      <div className='px-3'>
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight"> Your Dashboard</h1>
+        </div>
 
       {/* ── KPI Cards ── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -286,91 +307,81 @@ export default function DashboardPage() {
           title="Total Leads"
           value={leadsCount}
           icon={<Users size={16} />}
-          iconBg="linear-gradient(135deg, #10B981, #059669)"
-          iconColor="#fff"
-          glowColor="rgba(16,185,129,0.12)"
+          iconBg="rgba(16,185,129,0.12)"
+          iconColor="#10B981"
           href="/leads?filter=this_month"
+          subtitle="+12% from last month"
+          subtitleIcon={<TrendingUp size={13} />}
+          subtitleColor="#10B981"
           loading={leadsLoading}
         />
         <KpiCard
           title="Confirmed Events"
           value={confirmedCount}
           icon={<Calendar size={16} />}
-          iconBg="linear-gradient(135deg, #3B82F6, #2563EB)"
-          iconColor="#fff"
-          glowColor="rgba(59,130,246,0.12)"
+          iconBg="rgba(99,102,241,0.12)"
+          iconColor="#6366F1"
           href="/events?status=CONFIRMED"
-
+          subtitle="Next 30 days"
+          subtitleIcon={<TrendingDown size={13} />}
+          subtitleColor="#6366F1"
           loading={eventsLoading}
         />
         <KpiCard
           title="Total Revenue"
           value={formatINR(monthlyRevenue)}
           icon={<IndianRupee size={16} />}
-          iconBg="linear-gradient(135deg, #F59E0B, #D97706)"
-          iconColor="#fff"
-          glowColor="rgba(245,158,11,0.12)"
+          iconBg="rgba(99,102,241,0.10)"
+          iconColor="#6366F1"
           href="/reports/revenue"
+          subtitle="Confirmed events"
+          subtitleIcon={<TrendingDown size={13} />}
+          subtitleColor="#6366F1"
           loading={dashLoading}
         />
         <KpiCard
           title="Pending Payments"
           value={formatINR(pendingAmount)}
-          icon={<AlertCircle size={16} />}
-          iconBg="linear-gradient(135deg, #F43F5E, #E11D48)"
-          iconColor="#fff"
-          glowColor="rgba(244,63,94,0.12)"
+          icon={<Clock size={16} />}
+          iconBg="rgba(244,63,94,0.10)"
+          iconColor="#F43F5E"
           href="/events?payment_status=PENDING"
+          subtitle="3 events overdue"
+          subtitleIcon={<TrendingDown size={13} />}
+          subtitleColor="#F43F5E"
           loading={dashLoading}
         />
       </div>
 
-      {/* ── Main 2-column grid ── */}
+      {/* ── Row 1: Upcoming Events (60%) + Top Dishes (40%) ── */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
 
-        {/* ── LEFT: Upcoming Events Table (3/5) ── */}
+        {/* Upcoming Events */}
         <Card className="lg:col-span-3 flex flex-col overflow-hidden">
           {/* Header */}
           <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: '1px solid #F1F5F9' }}>
-            <div>
-              <h2 className="font-semibold" style={{ fontSize: 14, color: '#0F172A' }}>
-                Upcoming Events
-              </h2>
-              <p style={{ fontSize: 12, color: '#94A3B8', marginTop: 1 }}>Scheduled catering engagements</p>
-            </div>
-            {/* Filter tabs */}
-            <div
-              className="flex items-center gap-0.5 rounded-lg p-0.5"
-              style={{ background: '#F8FAFC', border: '1px solid #E2E8F0' }}
+            <h2 className="font-bold" style={{ fontSize: 15, color: '#0F172A' }}>
+              Upcoming Events
+            </h2>
+            <Link
+              href="/events"
+              className="font-semibold transition-colors hover:opacity-70"
+              style={{ fontSize: 13, color: '#10B981' }}
             >
-              {(['today', 'next7', 'weekly'] as EventFilter[]).map(f => (
-                <button
-                  key={f}
-                  onClick={() => setEventFilter(f)}
-                  className="px-3 py-1.5 rounded-md transition-all duration-150 font-medium"
-                  style={{
-                    fontSize: 11,
-                    background: eventFilter === f ? '#fff' : 'transparent',
-                    color: eventFilter === f ? '#0F172A' : '#94A3B8',
-                    boxShadow: eventFilter === f ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
-                  }}
-                >
-                  {f === 'today' ? 'Today' : f === 'next7' ? 'Next 7 days' : 'Weekly'}
-                </button>
-              ))}
-            </div>
+              View All
+            </Link>
           </div>
 
-          {/* Table body */}
+          {/* Table */}
           <div className="overflow-x-auto flex-1">
             {upcomingLoading ? (
               <div className="p-6 flex flex-col gap-3">
-                {Array.from({ length: 5 }).map((_, i) => (
+                {Array.from({ length: 4 }).map((_, i) => (
                   <Skeleton key={i} className="h-12 w-full rounded-xl" />
                 ))}
               </div>
             ) : upcomingList.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-20" style={{ color: '#CBD5E1' }}>
+              <div className="flex flex-col items-center justify-center py-20">
                 <div
                   className="flex items-center justify-center rounded-2xl mb-4"
                   style={{ width: 56, height: 56, background: '#F8FAFC', border: '1px solid #E2E8F0' }}
@@ -383,12 +394,12 @@ export default function DashboardPage() {
             ) : (
               <table className="w-full">
                 <thead>
-                  <tr style={{ background: '#FAFAFA', borderBottom: '1px solid #F1F5F9' }}>
-                    {['Event', 'Date', 'Venue', 'Guests', 'Status'].map(h => (
+                  <tr style={{ borderBottom: '1px solid #F1F5F9' }}>
+                    {['Event', 'Date', 'Guests', 'Status'].map(h => (
                       <th
                         key={h}
-                        className="px-5 py-3 text-left font-medium uppercase tracking-wide"
-                        style={{ fontSize: 10, color: '#94A3B8', letterSpacing: '0.07em' }}
+                        className="px-5 py-3 text-left font-semibold uppercase tracking-wide"
+                        style={{ fontSize: 10, color: '#10B981', letterSpacing: '0.07em' }}
                       >
                         {h}
                       </th>
@@ -396,7 +407,7 @@ export default function DashboardPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {upcomingList.map((event: any) => (
+                  {upcomingList.slice(0, 3).map((event: any) => (
                     <tr
                       key={event.id}
                       onClick={() => { window.location.href = `/events/${event.id}`; }}
@@ -405,16 +416,19 @@ export default function DashboardPage() {
                       onMouseEnter={e => (e.currentTarget.style.background = '#F8FAFC')}
                       onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                     >
+                      {/* Event + venue */}
                       <td className="px-5 py-4">
-                        <span className="font-semibold" style={{ fontSize: 13, color: '#0F172A' }}>
+                        <span className="font-bold block" style={{ fontSize: 13, color: '#0F172A' }}>
                           {event.event_name || event.name || '—'}
                         </span>
+                        {event.venue && (
+                          <span className="block mt-0.5" style={{ fontSize: 11, color: '#94A3B8' }}>
+                            {event.venue}
+                          </span>
+                        )}
                       </td>
                       <td className="px-5 py-4 whitespace-nowrap" style={{ fontSize: 12, color: '#64748B' }}>
                         {event.event_date ? fmtDate(event.event_date) : '—'}
-                      </td>
-                      <td className="px-5 py-4 max-w-30 truncate" style={{ fontSize: 12, color: '#64748B' }}>
-                        {event.venue || '—'}
                       </td>
                       <td className="px-5 py-4" style={{ fontSize: 12, color: '#64748B' }}>
                         {event.guest_count != null ? (
@@ -430,217 +444,192 @@ export default function DashboardPage() {
               </table>
             )}
           </div>
-
-          {/* Footer */}
-          <div
-            className="px-6 py-3 flex items-center justify-between"
-            style={{ borderTop: '1px solid #F1F5F9', background: '#FAFAFA' }}
-          >
-            <p style={{ fontSize: 12, color: '#94A3B8' }}>{upcomingList.length} event{upcomingList.length !== 1 ? 's' : ''} shown</p>
-            <Link
-              href="/events"
-              className="flex items-center gap-1 font-semibold transition-colors duration-150 hover:opacity-70"
-              style={{ fontSize: 12, color: '#10B981' }}
-            >
-              View all events <ArrowRight size={12} />
-            </Link>
-          </div>
         </Card>
 
-        {/* ── RIGHT: Analytics (2/5) ── */}
-        <div className="lg:col-span-2 flex flex-col gap-4">
+        {/* Top Dishes */}
+        <Card className="lg:col-span-2 flex flex-col overflow-hidden">
+          {/* Header */}
+          <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: '1px solid #F1F5F9' }}>
+            <h2 className="font-bold" style={{ fontSize: 15, color: '#0F172A' }}>
+              Top Dishes
+            </h2>
+            <Link
+              href="/master"
+              className="font-semibold transition-colors hover:opacity-70"
+              style={{ fontSize: 13, color: '#10B981' }}
+            >
+              View Menu
+            </Link>
+          </div>
 
-          {/* Revenue Trend */}
-          <Card className="p-5">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <div
-                  className="flex items-center justify-center rounded-lg"
-                  style={{ width: 28, height: 28, background: 'rgba(16,185,129,0.1)' }}
-                >
-                  <TrendingUp size={13} style={{ color: '#10B981' }} />
-                </div>
-                <div>
-                  <h3 className="font-semibold" style={{ fontSize: 13, color: '#0F172A' }}>Revenue Trend</h3>
-                  {isRevenueSample && (
-                    <span style={{ fontSize: 10, color: '#CBD5E1', fontWeight: 400 }}>Sample data</span>
-                  )}
-                </div>
+          {/* Dishes list */}
+          <div className="flex flex-col px-6 py-4 gap-4 flex-1">
+            {dishesLoading ? (
+              Array.from({ length: 4 }).map((_, i) => (
+                <Skeleton key={i} className="h-10 w-full rounded-lg" />
+              ))
+            ) : dishes.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12">
+                <UtensilsCrossed size={28} style={{ color: '#CBD5E1' }} className="mb-2" />
+                <p style={{ fontSize: 12, color: '#94A3B8' }}>No dish data available</p>
               </div>
+            ) : (
+              dishes.slice(0, 6).map((dish: any, i: number) => {
+                const revenue = dish.total_revenue ?? dish.total_quantity ?? 0;
+                const orders = dish.orders_count ?? dish.total_quantity ?? 0;
+                const growth = dish.growth ?? 5;
+                return (
+                  <div key={i} className="flex items-center gap-3">
+                    {/* Rank circle */}
+                    <div
+                      className="flex items-center justify-center rounded-full shrink-0 font-bold"
+                      style={{
+                        width: 28,
+                        height: 28,
+                        background: 'rgba(16,185,129,0.12)',
+                        color: '#10B981',
+                        fontSize: 12,
+                      }}
+                    >
+                      {i + 1}
+                    </div>
+                    {/* Name + orders */}
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold truncate" style={{ fontSize: 13, color: '#0F172A' }}>
+                        {dish.dish_name ?? dish.name}
+                      </p>
+                      <p style={{ fontSize: 11, color: '#94A3B8', marginTop: 1 }}>
+                        {orders.toLocaleString()} orders this month
+                        {isDishesSample && <span style={{ color: '#CBD5E1' }}> · Sample</span>}
+                      </p>
+                    </div>
+                    {/* Revenue + growth */}
+                    <div className="text-right shrink-0">
+                      <p className="font-bold" style={{ fontSize: 13, color: '#0F172A' }}>
+                        {formatINR(revenue)}
+                      </p>
+                      <p className="font-semibold" style={{ fontSize: 11, color: '#10B981', marginTop: 1 }}>
+                        +{growth}%
+                      </p>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </Card>
+      </div>
+
+      {/* ── Row 2: Revenue Trend (60%) + Events Per Day (40%) ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+
+        {/* Revenue Trend */}
+        <Card className="lg:col-span-3 p-6">
+          <div className="flex items-center justify-between mb-5">
+            <div className="flex items-center gap-2">
               <div
-                className="flex items-center gap-0.5 rounded-lg p-0.5"
+                className="flex items-center justify-center rounded-lg"
+                style={{ width: 28, height: 28, background: 'rgba(16,185,129,0.1)' }}
+              >
+                <TrendingUp size={13} style={{ color: '#10B981' }} />
+              </div>
+              <h3 className="font-bold" style={{ fontSize: 15, color: '#0F172A' }}>Revenue Trend</h3>
+              {isRevenueSample && (
+                <span style={{ fontSize: 10, color: '#CBD5E1' }}>· Sample</span>
+              )}
+            </div>
+            {/* Range selector */}
+            <div className="relative">
+              <div
+                className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 cursor-pointer"
                 style={{ background: '#F8FAFC', border: '1px solid #E2E8F0' }}
               >
+                <span style={{ fontSize: 12, color: '#374151', fontWeight: 500 }}>
+                  {revenueRange === 'daily' ? 'Last 7 Days' : revenueRange === 'weekly' ? 'Last 7 Days' : 'Monthly'}
+                </span>
+                <ChevronDown size={13} style={{ color: '#94A3B8' }} />
+              </div>
+              {/* hidden buttons for range selection */}
+              <div className="absolute right-0 top-8 z-10 hidden group-hover:flex flex-col bg-white rounded-lg shadow-lg border border-slate-100 py-1">
                 {(['daily', 'weekly', 'monthly'] as RevenueRange[]).map(r => (
                   <button
                     key={r}
                     onClick={() => setRevenueRange(r)}
-                    className="px-2.5 py-1 rounded-md transition-all duration-150 font-medium"
-                    style={{
-                      fontSize: 10,
-                      background: revenueRange === r ? '#fff' : 'transparent',
-                      color: revenueRange === r ? '#0F172A' : '#94A3B8',
-                      boxShadow: revenueRange === r ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
-                    }}
+                    className="px-4 py-2 text-left hover:bg-slate-50"
+                    style={{ fontSize: 12, color: revenueRange === r ? '#10B981' : '#374151' }}
                   >
-                    {r.charAt(0).toUpperCase() + r.slice(1)}
+                    {r === 'daily' ? 'Last 7 Days' : r === 'weekly' ? 'Weekly' : 'Monthly'}
                   </button>
                 ))}
               </div>
             </div>
-            {revenueLoading ? (
-              <Skeleton className="h-40 w-full rounded-xl" />
-            ) : (
-              <ResponsiveContainer width="100%" height={150}>
-                <AreaChart data={revenueTrend} margin={{ top: 8, right: 4, left: -24, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="revenueGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#10B981" stopOpacity={0.18} />
-                      <stop offset="100%" stopColor="#10B981" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="0" stroke="#F1F5F9" vertical={false} />
-                  <XAxis
-                    dataKey="label"
-                    tick={{ fontSize: 10, fill: '#CBD5E1' }}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <YAxis
-                    tick={{ fontSize: 10, fill: '#CBD5E1' }}
-                    axisLine={false}
-                    tickLine={false}
-                    tickFormatter={(v: number) => `₹${(v / 1000).toFixed(0)}K`}
-                  />
-                  <Tooltip content={<RevenueTooltip />} cursor={{ stroke: '#E2E8F0', strokeWidth: 1 }} />
-                  <Area
-                    type="monotone"
-                    dataKey="revenue"
-                    stroke="#10B981"
-                    strokeWidth={2.5}
-                    fill="url(#revenueGrad)"
-                    dot={false}
-                    activeDot={{ r: 5, fill: '#10B981', stroke: '#fff', strokeWidth: 2 }}
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
-            )}
-          </Card>
+          </div>
+          {revenueLoading ? (
+            <Skeleton className="h-48 w-full rounded-xl" />
+          ) : (
+            <ResponsiveContainer width="100%" height={200}>
+              <LineChart data={revenueTrend} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="0" stroke="#F1F5F9" vertical={false} />
+                <XAxis
+                  dataKey="label"
+                  tick={{ fontSize: 11, fill: '#94A3B8' }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  tick={{ fontSize: 11, fill: '#94A3B8' }}
+                  axisLine={false}
+                  tickLine={false}
+                  tickFormatter={(v: number) => `${(v / 1000).toFixed(0)}K`}
+                />
+                <Tooltip content={<RevenueTooltip />} cursor={{ stroke: '#E2E8F0', strokeWidth: 1 }} />
+                <Line
+                  type="monotone"
+                  dataKey="revenue"
+                  stroke="#10B981"
+                  strokeWidth={2.5}
+                  dot={false}
+                  activeDot={{ r: 5, fill: '#10B981', stroke: '#fff', strokeWidth: 2 }}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
+        </Card>
 
-          {/* Events Per Day */}
-          <Card className="p-5">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h3 className="font-semibold" style={{ fontSize: 13, color: '#0F172A' }}>Events per day</h3>
-                <p style={{ fontSize: 11, color: '#94A3B8', marginTop: 1 }}>
-                  Last 7 days
-                  {isEventsDaySample && <span style={{ color: '#CBD5E1' }}> · Sample</span>}
-                </p>
-              </div>
-            </div>
-            {dashLoading ? (
-              <Skeleton className="h-32 w-full rounded-xl" />
-            ) : (
-              <ResponsiveContainer width="100%" height={120}>
-                <BarChart data={eventsByDay} margin={{ top: 0, right: 4, left: -24, bottom: 0 }} barSize={20}>
-                  <CartesianGrid strokeDasharray="0" stroke="#F1F5F9" vertical={false} />
-                  <XAxis
-                    dataKey="label"
-                    tick={{ fontSize: 10, fill: '#CBD5E1' }}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <YAxis
-                    tick={{ fontSize: 10, fill: '#CBD5E1' }}
-                    axisLine={false}
-                    tickLine={false}
-                    allowDecimals={false}
-                  />
-                  <Tooltip content={<EventsTooltip />} cursor={{ fill: 'rgba(241,245,249,0.6)' }} />
-                  <Bar dataKey="count" radius={[5, 5, 0, 0]}>
-                    {eventsByDay.map((entry: any, index: number) => (
-                      <Cell
-                        key={`cell-${index}`}
-                        fill={entry.label === todayLabel ? '#10B981' : '#E2E8F0'}
-                      />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </Card>
+        {/* Events Per Day */}
+        <Card className="lg:col-span-2 p-6">
+          <div className="mb-5">
+            <h3 className="font-bold" style={{ fontSize: 15, color: '#0F172A' }}>Events per Day</h3>
+            <p style={{ fontSize: 12, color: '#94A3B8', marginTop: 2 }}>
+              Last 7 days
+              {isEventsDaySample && <span style={{ color: '#CBD5E1' }}> · Sample</span>}
+            </p>
+          </div>
+          {dashLoading ? (
+            <Skeleton className="h-48 w-full rounded-xl" />
+          ) : (
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={eventsByDay} margin={{ top: 8, right: 8, left: -20, bottom: 0 }} barSize={22}>
+                <CartesianGrid strokeDasharray="0" stroke="#F1F5F9" vertical={false} />
+                <XAxis
+                  dataKey="label"
+                  tick={{ fontSize: 11, fill: '#94A3B8' }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  tick={{ fontSize: 11, fill: '#94A3B8' }}
+                  axisLine={false}
+                  tickLine={false}
+                  allowDecimals={false}
+                />
+                <Tooltip content={<EventsTooltip />} cursor={{ fill: 'rgba(241,245,249,0.4)' }} />
+                <Bar dataKey="count" radius={[4, 4, 0, 0]} fill="#10B981" />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </Card>
 
-          {/* Top Dishes */}
-          <Card className="p-5">
-            <div className="flex items-center gap-2 mb-4">
-              <div
-                className="flex items-center justify-center rounded-lg"
-                style={{ width: 28, height: 28, background: 'rgba(245,158,11,0.1)' }}
-              >
-                <UtensilsCrossed size={13} style={{ color: '#F59E0B' }} />
-              </div>
-              <div>
-                <h3 className="font-semibold" style={{ fontSize: 13, color: '#0F172A' }}>Top dishes</h3>
-                {isDishesSample && (
-                  <span style={{ fontSize: 10, color: '#CBD5E1' }}>Sample data</span>
-                )}
-              </div>
-            </div>
-            {dishesLoading ? (
-              <div className="flex flex-col gap-3">
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <Skeleton key={i} className="h-8 w-full rounded-lg" />
-                ))}
-              </div>
-            ) : dishes.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-8" style={{ color: '#CBD5E1' }}>
-                <UtensilsCrossed size={28} className="mb-2 opacity-40" />
-                <p style={{ fontSize: 12 }}>No dish data available</p>
-              </div>
-            ) : (
-              <div className="flex flex-col gap-3">
-                {dishes.slice(0, 7).map((dish: any, i: number) => {
-                  const pct = maxQty > 0 ? (dish.total_quantity / maxQty) * 100 : 0;
-                  // gradient: top dish gets full green, others fade
-                  const barColor = i === 0 ? '#10B981' : i === 1 ? '#34D399' : '#A7F3D0';
-                  return (
-                    <div key={i} className="flex flex-col gap-1.5">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <span
-                            className="font-semibold shrink-0 flex items-center justify-center rounded-md"
-                            style={{
-                              fontSize: 10,
-                              width: 18,
-                              height: 18,
-                              background: i < 3 ? 'rgba(16,185,129,0.1)' : '#F8FAFC',
-                              color: i < 3 ? '#10B981' : '#94A3B8',
-                            }}
-                          >
-                            {i + 1}
-                          </span>
-                          <span className="truncate max-w-27.5" style={{ fontSize: 12, fontWeight: 500, color: '#0F172A' }}>
-                            {dish.dish_name ?? dish.name}
-                          </span>
-                        </div>
-                        <span className="font-semibold tabular-nums" style={{ fontSize: 11, color: '#64748B' }}>
-                          {dish.total_quantity.toLocaleString()}
-                        </span>
-                      </div>
-                      <div className="w-full rounded-full overflow-hidden" style={{ height: 4, background: '#F1F5F9' }}>
-                        <div
-                          className="h-full rounded-full transition-all duration-500"
-                          style={{ width: `${pct}%`, background: barColor }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </Card>
-
-        </div>
       </div>
     </div>
   );

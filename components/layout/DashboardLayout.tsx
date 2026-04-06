@@ -135,19 +135,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   <span key={crumb.href} className="flex items-center gap-1 min-w-0">
                     {i > 0 && <ChevronRight size={13} style={{ color: '#CBD5E1', flexShrink: 0 }} />}
                     <span
-                      className="truncate transition-colors duration-150"
-                      style={{
-                        fontSize:   13,
-                        fontWeight: crumb.isLast ? 600 : 400,
-                        color:      crumb.isLast ? '#0F172A' : '#94A3B8',
-                      }}
+                      className={`truncate transition-colors duration-150 text-[13px] ${crumb.isLast ? 'font-semibold text-slate-900' : 'font-normal text-slate-400'}`}
                     >
                       {crumb.label}
                     </span>
                   </span>
                 ))}
               </nav>
-              <p className="hidden sm:block" style={{ fontSize: 11, color: '#CBD5E1', fontWeight: 400 }}>
+              <p className="hidden sm:block text-[11px] font-normal text-slate-300">
                 {new Date().toLocaleDateString('en-IN', {
                   weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
                 })}
@@ -172,22 +167,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               <input
                 type="text"
                 placeholder="Search..."
-                className="bg-transparent outline-none flex-1 min-w-0"
-                style={{ fontSize: 13, color: '#0F172A' }}
+                className="bg-transparent outline-none flex-1 min-w-0 text-[13px] text-slate-900"
                 onFocus={() => setSearchFocused(true)}
                 onBlur={() => setSearchFocused(false)}
               />
               {!searchFocused && (
                 <kbd
-                  className="rounded-md px-1.5 shrink-0"
-                  style={{
-                    fontSize:   10,
-                    fontWeight: 500,
-                    background: '#F1F5F9',
-                    border:     '1px solid #E2E8F0',
-                    color:      '#94A3B8',
-                    lineHeight: '18px',
-                  }}
+                  className="rounded-md px-1.5 shrink-0 text-[10px] font-medium bg-slate-100 border border-slate-200 text-slate-400 leading-4.5"
                 >
                   /
                 </kbd>
@@ -246,10 +232,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 {initials}
               </div>
               <div className="hidden md:block">
-                <p style={{ fontSize: 12, fontWeight: 600, color: '#0F172A', lineHeight: 1.3 }}>
+                <p className="text-xs font-semibold text-slate-800 leading-tight">
                   {user?.full_name?.split(' ')[0] || 'User'}
                 </p>
-                <p style={{ fontSize: 10, color: '#94A3B8', textTransform: 'capitalize' }}>
+                <p className="text-[10px] text-slate-400 capitalize">
                   {user?.role?.toLowerCase() || 'staff'}
                 </p>
               </div>

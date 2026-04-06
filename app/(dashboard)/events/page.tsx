@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Plus, Search, Eye, Pencil, ChevronLeft, ChevronRight, ChevronDown,
   X, Loader2, FileSpreadsheet, ShoppingCart, CheckCircle, FilterX, Calendar,
+  LayoutGrid, LayoutList, MapPin, Users,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '@/lib/api';
@@ -18,6 +19,7 @@ import { DateRangeDropdown, type DatePreset } from '@/components/filters/DateRan
 
 interface Event {
   id: string;
+  event_number?: string;
   client_name?: string;
   contact_number?: string;
   event_type: string;
@@ -60,6 +62,13 @@ const PMT_STYLE: Record<string, { bg: string; color: string }> = {
   PARTIAL:      { bg: '#FFF7ED', color: '#F97316' },
   PENDING:      { bg: '#FEF2F2', color: '#DC2626' },
   FULLY_PAID:   { bg: '#ECFDF5', color: '#0D9488' },
+};
+
+const PMT_LABELS: Record<string, string> = {
+  ADVANCE_PAID: 'Advance Paid',
+  PARTIAL:      'Partial Payment',
+  PENDING:      'Pending Payment',
+  FULLY_PAID:   'Paid Payment',
 };
 
 const SERVICE_LABELS: Record<string, string> = {
@@ -443,6 +452,7 @@ function EventsPageContent() {
   const [selectedIds,   setSelectedIds]   = useState<Set<string>>(new Set());
   const [transitioning, setTransitioning] = useState<string | null>(null);
   const [exportOpen,    setExportOpen]    = useState(false);
+  const [viewMode,      setViewMode]      = useState<'card' | 'list'>('card');
   const exportRef = useRef<HTMLDivElement>(null);
 
   // Close export menu on outside click
@@ -594,20 +604,33 @@ function EventsPageContent() {
   ];
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-5 p-4">
 
       {/* Page Header */}
       <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm mt-0.5" style={{ color: '#64748B' }}>
-            {totalCount > 0 ? `${totalCount} total events` : 'No events found'}
-          </p>
+        <div className='px-3'>
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight"> Your Events</h1>
         </div>
-        <button onClick={() => { setEditing(null); setDrawerOpen(true); }}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white"
-          style={{ backgroundColor: '#D95F0E' }}>
-          <Plus size={16} /> New Event
-        </button>
+        <div className="flex items-center gap-2">
+          {/* View toggle */}
+          <div className="flex items-center rounded-lg overflow-hidden" style={{ border: '1px solid #E2E8F0' }}>
+            <button onClick={() => setViewMode('card')} title="Card view"
+              className="p-2 transition-colors"
+              style={{ backgroundColor: viewMode === 'card' ? '#1C3355' : '#fff', color: viewMode === 'card' ? '#fff' : '#64748B' }}>
+              <LayoutGrid size={16} />
+            </button>
+            <button onClick={() => setViewMode('list')} title="List view"
+              className="p-2 transition-colors"
+              style={{ backgroundColor: viewMode === 'list' ? '#1C3355' : '#fff', color: viewMode === 'list' ? '#fff' : '#64748B' }}>
+              <LayoutList size={16} />
+            </button>
+          </div>
+          <button onClick={() => { setEditing(null); setDrawerOpen(true); }}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white"
+            style={{ backgroundColor: '#D95F0E' }}>
+            <Plus size={16} /> New Event
+          </button>
+        </div>
       </div>
 
       {/* Filter Bar */}
@@ -738,182 +761,262 @@ function EventsPageContent() {
         </div>
       )}
 
-      {/* Table */}
-      <div className="rounded-xl" style={{ border: '1px solid #E2E8F0', backgroundColor: '#fff', overflow: 'visible' }}>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr style={{ backgroundColor: '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}>
-                <th className="px-4 py-3 w-10">
-                  <input type="checkbox"
-                    checked={events.length > 0 && selectedIds.size === events.length}
-                    onChange={toggleAll} className="accent-[#1C3355] rounded" />
-                </th>
-                {TABLE_HEADERS.map(h => (
-                  <th key={h} className="px-4 py-3 text-left text-xs font-semibold whitespace-nowrap"
-                    style={{ color: '#64748B' }}>{h}</th>
+      {/* Card View */}
+      {viewMode === 'card' && (
+        isLoading
+          ? (
+              <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
+                {Array.from({ length: pageSize }).map((_, i) => (
+                  <Skeleton key={i} className="h-52 rounded-xl" />
                 ))}
-              </tr>
-            </thead>
-            <tbody>
-              {isLoading
-                ? Array.from({ length: pageSize }).map((_, i) => (
-                    <tr key={i} style={{ borderBottom: '1px solid #F1F5F9' }}>
-                      {Array.from({ length: TABLE_HEADERS.length + 1 }).map((_, j) => (
-                        <td key={j} className="px-4 py-3"><Skeleton className="h-4 w-full" /></td>
-                      ))}
-                    </tr>
-                  ))
-                : events.length === 0
-                ? (
-                    <tr>
-                      <td colSpan={TABLE_HEADERS.length + 1} className="px-4 py-16 text-center">
-                        <Calendar size={40} className="mx-auto mb-3 opacity-20" style={{ color: '#64748B' }} />
-                        <p className="text-sm" style={{ color: '#94A3B8' }}>No events found</p>
-                        {hasFilters && (
-                          <button onClick={clearFilters} className="mt-2 text-xs underline" style={{ color: '#D95F0E' }}>
-                            Clear filters
-                          </button>
+              </div>
+            )
+          : events.length === 0
+          ? (
+              <div className="py-20 text-center">
+                <Calendar size={40} className="mx-auto mb-3 opacity-20" style={{ color: '#64748B' }} />
+                <p className="text-sm" style={{ color: '#94A3B8' }}>No events found</p>
+                {hasFilters && (
+                  <button onClick={clearFilters} className="mt-2 text-xs underline" style={{ color: '#D95F0E' }}>
+                    Clear filters
+                  </button>
+                )}
+              </div>
+            )
+          : (
+              <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
+                {events.map(event => {
+                  const pmtColor = PMT_STYLE[event.payment_status ?? '']?.color;
+                  return (
+                    <div key={event.id}
+                      onClick={() => router.push(`/events/${event.id}`)}
+                      className="flex flex-col rounded-2xl"
+                      style={{ border: '1px solid #E8EDF2', backgroundColor: '#fff', cursor: 'pointer', transition: 'box-shadow 0.15s' }}
+                      onMouseEnter={e => (e.currentTarget.style.boxShadow = '0 4px 20px rgba(0,0,0,0.07)')}
+                      onMouseLeave={e => (e.currentTarget.style.boxShadow = 'none')}>
+
+                      {/* Top meta row */}
+                      <div className="flex justify-between items-center">
+                      {/* Name + event type */}
+                      <div className="px-5 py-3">
+                        <div className="text-base font-semibold text-slate-900 leading-snug">
+                          {event.client_name || '—'}
+                        </div>
+                        <div className="text-xs font-medium text-slate-400 mt-0.5">
+                          {event.event_type}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between px-5 pt-5 pb-3">
+                        {event.event_number && (
+                          <span className="text-xs font-medium tracking-wide" style={{ color: '#94A3B8' }}>
+                            {event.event_number}
+                          </span>
                         )}
-                      </td>
-                    </tr>
-                  )
-                : events.map(event => {
-                    const pending = calcPending(event);
-                    return (
-                      <tr key={event.id}
-                        onClick={() => router.push(`/events/${event.id}`)}
-                        className="transition-colors hover:bg-slate-50"
-                        style={{ borderBottom: '1px solid #F1F5F9', cursor: 'pointer' }}>
+                        <StatusBadge value={event.status} map={STATUS_STYLE} />
+                      </div>
 
-                        {/* Checkbox — stops row navigation */}
-                        <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
-                          <input type="checkbox" checked={selectedIds.has(event.id)}
-                            onChange={() => toggleSelect(event.id)} className="accent-[#1C3355] rounded" />
-                        </td>
+                        </div>
 
-                        {/* Client Name */}
-                        <td className="px-4 py-3">
-                          <div className="font-medium text-sm" style={{ color: '#0F172A' }}>
-                            {event.client_name || '—'}
-                          </div>
-                          {event.contact_number && (
-                            <div className="text-xs" style={{ color: '#94A3B8' }}>{event.contact_number}</div>
-                          )}
-                        </td>
+                      {/* Divider */}
+                      <div style={{ borderTop: '1px solid #F1F5F9' }} />
 
-                        {/* Event Date */}
-                        <td className="px-4 py-3 whitespace-nowrap" style={{ color: '#64748B' }}>
-                          <div>{fmtDate(event.event_date)}</div>
-                          {event.event_time && (
-                            <div className="text-xs" style={{ color: '#94A3B8' }}>{fmtTime(event.event_time)}</div>
-                          )}
-                        </td>
+                      {/* Detail rows */}
+                      <div className="flex flex-col gap-3 px-5 py-4 flex-1">
+                        <div className="flex items-center gap-3 text-sm" style={{ color: '#475569' }}>
+                          <Calendar size={15} className="shrink-0" style={{ color: '#94A3B8' }} />
+                          <span>{fmtDate(event.event_date)}</span>
+                        </div>
+                        <div className="flex items-center gap-3 text-sm" style={{ color: '#475569' }}>
+                          <MapPin size={15} className="shrink-0" style={{ color: '#94A3B8' }} />
+                          <span className="truncate">{event.venue || '—'}</span>
+                        </div>
+                        <div className="flex items-center gap-3 text-sm" style={{ color: '#475569' }}>
+                          <Users size={15} className="shrink-0" style={{ color: '#94A3B8' }} />
+                          <span>{event.guest_count} Guests</span>
+                        </div>
+                      </div>
 
-                        {/* Venue */}
-                        <td className="px-4 py-3 max-w-[120px] truncate" style={{ color: '#64748B' }}>
-                          {event.venue || '—'}
-                        </td>
+                      {/* Footer */}
+                      <div
+  className="flex items-center justify-between px-5 py-4 group cursor-pointer"
+  style={{ borderTop: '1px solid #F1F5F9' }}
+>
+  {/* Left: Payment Status */}
+  {event.payment_status ? (
+    <div className="flex items-center gap-2 text-sm font-medium text-slate-600">
+      <span
+        className="w-2 h-2 rounded-full shrink-0"
+        style={{ backgroundColor: pmtColor ?? '#94A3B8' }}
+      />
+      {PMT_LABELS[event.payment_status] ?? event.payment_status}
+    </div>
+  ) : (
+    <span />
+  )}
 
-                        {/* Service Type */}
-                        <td className="px-4 py-3 whitespace-nowrap text-xs" style={{ color: '#64748B' }}>
-                          {SERVICE_LABELS[event.service_type] ?? event.service_type}
-                        </td>
+  {/* Right: CTA */}
+  <div className="flex items-center gap-1 text-sm font-medium text-slate-700 group-hover:text-slate-900 transition">
+    <span>View Event</span>
+    <ChevronRight
+      size={16}
+      className="text-slate-400 group-hover:translate-x-1 transition-transform"
+    />
+  </div>
+</div>
+                    </div>
+                  );
+                })}
+              </div>
+            )
+      )}
 
-                        {/* Guests */}
-                        <td className="px-4 py-3 text-right tabular-nums" style={{ color: '#64748B' }}>
-                          {event.guest_count}
-                        </td>
-
-                        {/* Total */}
-                        <td className="px-4 py-3 whitespace-nowrap font-medium tabular-nums" style={{ color: '#0F172A' }}>
-                          {fmtINR(event.total_amount)}
-                        </td>
-
-                        {/* Paid */}
-                        <td className="px-4 py-3 whitespace-nowrap font-medium tabular-nums" style={{ color: '#16A34A' }}>
-                          {fmtINR(event.advance_amount)}
-                        </td>
-
-                        {/* Pending */}
-                        <td className="px-4 py-3 whitespace-nowrap font-medium tabular-nums"
-                          style={{ color: pending != null && pending > 0 ? '#DC2626' : '#94A3B8' }}>
-                          {pending != null ? fmtINR(pending) : '—'}
-                        </td>
-
-                        {/* Status — inline dropdown, stops row navigation internally */}
-                        <td className="px-4 py-3">
-                          <StatusSelector
-                            event={event}
-                            onTransition={handleTransition}
-                            transitioning={transitioning}
-                          />
-                        </td>
-
-                        {/* Payment */}
-                        <td className="px-4 py-3">
-                          {event.payment_status
-                            ? <StatusBadge value={event.payment_status} map={PMT_STYLE} />
-                            : <span style={{ color: '#94A3B8' }}>—</span>}
-                        </td>
-
-                        {/* Actions — stops row navigation */}
-                        <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
-                          <div className="flex items-center gap-1">
-                            <button onClick={() => router.push(`/events/${event.id}`)}
-                              className="p-1.5 rounded-lg hover:bg-slate-100" title="View">
-                              <Eye size={14} style={{ color: '#64748B' }} />
+      {/* List (Table) View */}
+      {viewMode === 'list' && (
+        <div className="rounded-xl" style={{ border: '1px solid #E2E8F0', backgroundColor: '#fff', overflow: 'visible' }}>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr style={{ backgroundColor: '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}>
+                  <th className="px-4 py-3 w-10">
+                    <input type="checkbox"
+                      checked={events.length > 0 && selectedIds.size === events.length}
+                      onChange={toggleAll} className="accent-[#1C3355] rounded" />
+                  </th>
+                  {TABLE_HEADERS.map(h => (
+                    <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 whitespace-nowrap">
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {isLoading
+                  ? Array.from({ length: pageSize }).map((_, i) => (
+                      <tr key={i} style={{ borderBottom: '1px solid #F1F5F9' }}>
+                        {Array.from({ length: TABLE_HEADERS.length + 1 }).map((_, j) => (
+                          <td key={j} className="px-4 py-3"><Skeleton className="h-4 w-full" /></td>
+                        ))}
+                      </tr>
+                    ))
+                  : events.length === 0
+                  ? (
+                      <tr>
+                        <td colSpan={TABLE_HEADERS.length + 1} className="px-4 py-16 text-center">
+                          <Calendar size={40} className="mx-auto mb-3 opacity-20" style={{ color: '#64748B' }} />
+                          <p className="text-sm" style={{ color: '#94A3B8' }}>No events found</p>
+                          {hasFilters && (
+                            <button onClick={clearFilters} className="mt-2 text-xs underline" style={{ color: '#D95F0E' }}>
+                              Clear filters
                             </button>
-                            <button onClick={() => { setEditing(event); setDrawerOpen(true); }}
-                              className="p-1.5 rounded-lg hover:bg-slate-100" title="Edit">
-                              <Pencil size={14} style={{ color: '#64748B' }} />
-                            </button>
-                          </div>
+                          )}
                         </td>
                       </tr>
-                    );
-                  })
-              }
-            </tbody>
-          </table>
-        </div>
+                    )
+                  : events.map(event => {
+                      const pending = calcPending(event);
+                      return (
+                        <tr key={event.id}
+                          onClick={() => router.push(`/events/${event.id}`)}
+                          className="transition-colors hover:bg-slate-50"
+                          style={{ borderBottom: '1px solid #F1F5F9', cursor: 'pointer' }}>
 
-        {/* Pagination */}
-        {totalCount > 0 && (
-          <div className="flex items-center justify-between px-4 py-3 border-t" style={{ borderColor: '#E2E8F0' }}>
-            <div className="flex items-center gap-3">
-              <span className="text-xs" style={{ color: '#64748B' }}>
-                Showing {from}–{to} of {totalCount} events
-              </span>
-              <select value={pageSize} onChange={e => setPageSize(Number(e.target.value))}
-                className="px-2 py-1 rounded text-xs outline-none"
-                style={{ border: '1px solid #E2E8F0', color: '#64748B' }}>
-                {PAGE_SIZES.map(s => <option key={s} value={s}>{s} / page</option>)}
-              </select>
-            </div>
-            <div className="flex items-center gap-1">
-              <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
-                className="p-1.5 rounded-lg disabled:opacity-40 hover:bg-slate-100">
-                <ChevronLeft size={16} style={{ color: '#64748B' }} />
-              </button>
-              {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                const pg = totalPages <= 5 ? i + 1 : Math.max(1, Math.min(page - 2, totalPages - 4)) + i;
-                return (
-                  <button key={pg} onClick={() => setPage(pg)}
-                    className="w-7 h-7 rounded-lg text-xs font-medium"
-                    style={{ backgroundColor: page === pg ? '#1C3355' : 'transparent', color: page === pg ? '#fff' : '#64748B' }}>
-                    {pg}
-                  </button>
-                );
-              })}
-              <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}
-                className="p-1.5 rounded-lg disabled:opacity-40 hover:bg-slate-100">
-                <ChevronRight size={16} style={{ color: '#64748B' }} />
-              </button>
-            </div>
+                          <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                            <input type="checkbox" checked={selectedIds.has(event.id)}
+                              onChange={() => toggleSelect(event.id)} className="accent-[#1C3355] rounded" />
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="text-sm font-medium text-slate-800">{event.client_name || '—'}</div>
+                            {event.contact_number && (
+                              <div className="text-xs text-slate-400">{event.contact_number}</div>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap text-sm text-slate-600">
+                            <div>{fmtDate(event.event_date)}</div>
+                            {event.event_time && (
+                              <div className="text-xs text-slate-400">{fmtTime(event.event_time)}</div>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 max-w-30 truncate text-sm text-slate-600">{event.venue || '—'}</td>
+                          <td className="px-4 py-3 whitespace-nowrap text-xs text-slate-600">
+                            {SERVICE_LABELS[event.service_type] ?? event.service_type}
+                          </td>
+                          <td className="px-4 py-3 text-right text-sm tabular-nums text-slate-600">{event.guest_count}</td>
+                          <td className="px-4 py-3 whitespace-nowrap text-sm font-medium tabular-nums text-slate-800">
+                            {fmtINR(event.total_amount)}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap text-sm font-medium tabular-nums text-green-700">
+                            {fmtINR(event.advance_amount)}
+                          </td>
+                          <td className={`px-4 py-3 whitespace-nowrap text-sm font-medium tabular-nums ${pending != null && pending > 0 ? 'text-red-600' : 'text-slate-400'}`}>
+                            {pending != null ? fmtINR(pending) : '—'}
+                          </td>
+                          <td className="px-4 py-3">
+                            <StatusSelector event={event} onTransition={handleTransition} transitioning={transitioning} />
+                          </td>
+                          <td className="px-4 py-3">
+                            {event.payment_status
+                              ? <StatusBadge value={event.payment_status} map={PMT_STYLE} />
+                              : <span style={{ color: '#94A3B8' }}>—</span>}
+                          </td>
+                          <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                            <div className="flex items-center gap-1">
+                              <button onClick={() => router.push(`/events/${event.id}`)}
+                                className="p-1.5 rounded-lg hover:bg-slate-100" title="View">
+                                <Eye size={14} style={{ color: '#64748B' }} />
+                              </button>
+                              <button onClick={() => { setEditing(event); setDrawerOpen(true); }}
+                                className="p-1.5 rounded-lg hover:bg-slate-100" title="Edit">
+                                <Pencil size={14} style={{ color: '#64748B' }} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                }
+              </tbody>
+            </table>
           </div>
-        )}
-      </div>
+        </div>
+      )}
+
+      {/* Pagination — shared between both views */}
+      {totalCount > 0 && (
+        <div className="flex items-center justify-between px-4 py-3 rounded-xl"
+          style={{ backgroundColor: '#fff', border: '1px solid #E2E8F0' }}>
+          <div className="flex items-center gap-3">
+            <span className="text-xs" style={{ color: '#64748B' }}>
+              Showing {from}–{to} of {totalCount} events
+            </span>
+            <select value={pageSize} onChange={e => setPageSize(Number(e.target.value))}
+              className="px-2 py-1 rounded text-xs outline-none"
+              style={{ border: '1px solid #E2E8F0', color: '#64748B' }}>
+              {PAGE_SIZES.map(s => <option key={s} value={s}>{s} / page</option>)}
+            </select>
+          </div>
+          <div className="flex items-center gap-1">
+            <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
+              className="p-1.5 rounded-lg disabled:opacity-40 hover:bg-slate-100">
+              <ChevronLeft size={16} style={{ color: '#64748B' }} />
+            </button>
+            {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+              const pg = totalPages <= 5 ? i + 1 : Math.max(1, Math.min(page - 2, totalPages - 4)) + i;
+              return (
+                <button key={pg} onClick={() => setPage(pg)}
+                  className="w-7 h-7 rounded-lg text-xs font-medium"
+                  style={{ backgroundColor: page === pg ? '#1C3355' : 'transparent', color: page === pg ? '#fff' : '#64748B' }}>
+                  {pg}
+                </button>
+              );
+            })}
+            <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}
+              className="p-1.5 rounded-lg disabled:opacity-40 hover:bg-slate-100">
+              <ChevronRight size={16} style={{ color: '#64748B' }} />
+            </button>
+          </div>
+        </div>
+      )}
 
       <EventDrawer
         open={drawerOpen}

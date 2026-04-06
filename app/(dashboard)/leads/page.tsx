@@ -284,6 +284,7 @@ function LeadDrawer({
       const payload: Record<string, unknown> = {
         customer_name:    form.customer_name,
         contact_number:   form.contact_number || '',
+        email:            form.email || '',
         source_channel:   form.source_channel,
         event_type:       form.event_type || '',
         tentative_date:   form.tentative_date || null,
@@ -570,13 +571,13 @@ export default function LeadsPage() {
   }
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-5 p-4">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-sm mt-0.5" style={{ color: '#64748B' }}>
-            {totalCount > 0 ? `${totalCount} total leads` : 'No leads found'}
-          </p>
+         <p className="text-2xl px-3 font-bold tracking-tight text-slate-900">
+          Your Leads
+        </p>
         </div>
         <button
           onClick={openNew}
@@ -690,13 +691,14 @@ export default function LeadsPage() {
                 leads.map((lead, idx) => (
                   <tr key={lead.id}
                     className="transition-colors hover:bg-slate-50"
+                     onClick={() => router.push(`/leads/${lead.id}`)}
                     style={{ borderBottom: '1px solid #F1F5F9' }}>
                     <td className="px-4 py-3 text-xs" style={{ color: '#94A3B8' }}>
                       {from + idx}
                     </td>
                     <td className="px-4 py-3">
                       <button
-                        onClick={() => setDetailLead(lead)}
+                       
                         className="font-medium text-left hover:underline"
                         style={{ color: '#1C3355' }}>
                         {lead.customer_name}
