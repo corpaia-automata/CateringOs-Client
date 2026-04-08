@@ -13,8 +13,13 @@ export const authStorage = {
     const raw = localStorage.getItem('cos_user');
     return raw ? JSON.parse(raw) : null;
   },
+  setSlug(slug: string) {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem('tenantSlug', slug);
+  },
+  getSlug: () => typeof window !== 'undefined' ? localStorage.getItem('tenantSlug') : null,
   clear() {
-    ['cos_access', 'cos_refresh', 'cos_user'].forEach(k => localStorage.removeItem(k));
+    ['cos_access', 'cos_refresh', 'cos_user', 'tenantSlug'].forEach(k => localStorage.removeItem(k));
     document.cookie = 'cos_access=; path=/; max-age=0';
   },
   isLoggedIn: () => typeof window !== 'undefined' && !!localStorage.getItem('cos_access'),

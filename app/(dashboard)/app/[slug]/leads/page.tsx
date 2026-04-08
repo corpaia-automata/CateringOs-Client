@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import {
   Plus, Search, Pencil, ArrowRightCircle, Trash2,
-  ChevronLeft, ChevronRight, X, Loader2, FileSpreadsheet, Users, Eye,
+  ChevronLeft, ChevronRight, X, Loader2, FileSpreadsheet, Users,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '@/lib/api';
@@ -27,7 +27,6 @@ interface Lead {
   source_channel?: string;
   notes?: string;
   created_at: string;
-  converted_event?: { id: string; event_code: string } | null;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -435,7 +434,7 @@ function LeadDrawer({
                 value={form.status} onChange={e => set('status', e.target.value)}
                 onFocus={e => (e.currentTarget.style.borderColor = '#D95F0E')}
                 onBlur={e => (e.currentTarget.style.borderColor = '#E2E8F0')}>
-                {['NEW', 'QUALIFIED', 'FOLLOW_UP', 'CONVERTED', 'LOST'].map(s =>
+                {['NEW', 'QUALIFIED', 'FOLLOW_UP', 'LOST'].map(s =>
                   <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
               </select>
             </div>
@@ -557,7 +556,7 @@ export default function LeadsPage() {
       toast.success('Lead converted to event!');
       qc.invalidateQueries({ queryKey: ['leads'] });
       qc.invalidateQueries({ queryKey: ['events'] });
-      const eventId = res?.id;
+      const eventId = res?.event_id ?? res?.id;
       if (eventId) router.push(`/events/${eventId}`);
       else router.push('/events');
     } catch (err: unknown) {
@@ -731,14 +730,7 @@ export default function LeadsPage() {
                           title="Edit">
                           <Pencil size={14} style={{ color: '#64748B' }} />
                         </button>
-                        {lead.status === 'CONVERTED' && lead.converted_event?.id ? (
-                          <button
-                            onClick={() => router.push(`/events/${lead.converted_event!.id}`)}
-                            className="p-1.5 rounded-lg transition-colors hover:bg-teal-50"
-                            title="View Event">
-                            <Eye size={14} style={{ color: '#0D9488' }} />
-                          </button>
-                        ) : lead.status !== 'CONVERTED' && lead.status !== 'LOST' && (
+                        {lead.status !== 'CONVERTED' && lead.status !== 'LOST' && (
                           <button
                             onClick={() => handleConvert(lead)}
                             disabled={convertingId === lead.id}

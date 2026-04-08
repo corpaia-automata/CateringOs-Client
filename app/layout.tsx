@@ -12,7 +12,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: 'CateringOS — Afsal Catering',
+  title: 'CateringOS',
   description: 'Catering operations management system',
 };
 

@@ -11,7 +11,6 @@ import {
   ShoppingBasket,
   FileText,
   CreditCard,
-  BarChart3,
   Settings,
   LogOut,
   ChevronLeft,
@@ -19,16 +18,16 @@ import {
 } from 'lucide-react';
 import { authStorage } from '@/lib/auth';
 
-const NAV_ITEMS = [
-  { label: 'Dashboard',  href: '/dashboard', icon: LayoutDashboard },
-  { label: 'Leads',      href: '/leads',      icon: Users },
-  { label: 'Events',     href: '/events',     icon: Calendar },
-  { label: 'Menu',       href: '/master',     icon: UtensilsCrossed },
-  { label: 'Grocery',    href: '/grocery',    icon: ShoppingBasket },
-  { label: 'Quotations', href: '/quotations', icon: FileText },
-  { label: 'Payments',   href: '/payments',   icon: CreditCard },
-  { label: 'Reports',    href: '/reports',    icon: BarChart3 },
-  { label: 'Settings',   href: '/settings',   icon: Settings },
+const NAV_PATHS = [
+  { label: 'Dashboard',  path: 'dashboard', icon: LayoutDashboard },
+  { label: 'Leads',      path: 'leads',      icon: Users },
+  { label: 'Events',     path: 'events',     icon: Calendar },
+  { label: 'Menu',       path: 'master',     icon: UtensilsCrossed },
+  { label: 'Grocery',    path: 'grocery',    icon: ShoppingBasket },
+  { label: 'Quotations', path: 'quotations', icon: FileText },
+  { label: 'Payments',   path: 'payments',   icon: CreditCard },
+  // { label: 'Reports',    path: 'reports',    icon: BarChart3 },
+  { label: 'Settings',   path: 'settings',   icon: Settings },
 ];
 
 type SidebarProps = {
@@ -46,13 +45,22 @@ export default function Sidebar({ isOpen, isCollapsed, onClose, onToggle }: Side
     return () => { document.body.style.overflow = ''; };
   }, [isOpen]);
 
+  const slug = authStorage.getSlug() ?? '';
+  const base = slug ? `/app/${slug}` : '';
+  const NAV_ITEMS = NAV_PATHS.map(({ label, path, icon }) => ({
+    label,
+    href: `${base}/${path}`,
+    icon,
+  }));
+
   function handleLogout() {
     authStorage.clear();
     router.push('/login');
   }
 
   function isActive(href: string) {
-    if (href === '/dashboard') return pathname === '/dashboard';
+    const dashboardHref = `${base}/dashboard`;
+    if (href === dashboardHref) return pathname === dashboardHref;
     return pathname.startsWith(href);
   }
 
@@ -98,7 +106,7 @@ export default function Sidebar({ isOpen, isCollapsed, onClose, onToggle }: Side
       {/* Mobile overlay */}
       <div
         aria-hidden="true"
-        className={`fixed inset-0 z-30 bg-black/40 backdrop-blur-sm transition-all duration-300 md:hidden ${
+        className={`fixed inset-0 z-30 bg-black/40 backdrop-blur-sm transition-all duration-300  md:hidden ${
           isOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
         }`}
         onClick={onClose}
@@ -107,7 +115,7 @@ export default function Sidebar({ isOpen, isCollapsed, onClose, onToggle }: Side
       {/* Sidebar */}
       <aside
         className={`
-          fixed left-0 top-0 h-screen flex flex-col z-40 select-none transition-all duration-300
+          fixed left-0 top-0 h-screen flex flex-col z-40 select-none shadow-2xl transition-all duration-300
           ${isOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
         `}
         style={{
@@ -135,11 +143,11 @@ export default function Sidebar({ isOpen, isCollapsed, onClose, onToggle }: Side
                 fontSize:   18,
               }}
             >
-              A
+              C
             </div>
             {!isCollapsed && (
               <span style={{ fontSize: 15, fontWeight: 700, color: '#111827', letterSpacing: '-0.01em' }}>
-                Afsal Catering
+                CateringOS
               </span>
             )}
           </div>

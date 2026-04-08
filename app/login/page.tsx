@@ -1,39 +1,74 @@
 'use client';
 
-import { useState, FormEvent, Suspense } from 'react';
+import { useState, FormEvent, Suspense, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ChefHat, Eye, EyeOff, Loader2 } from 'lucide-react';
+import { ChefHat, Eye, EyeOff, Loader2, CheckCircle2 } from 'lucide-react';
 import { authStorage } from '@/lib/auth';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 function LoginPageContent() {
-  const router = useRouter();
+  const router       = useRouter();
   const searchParams = useSearchParams();
-  const from = searchParams.get('from') || '/dashboard';
 
-  const [email, setEmail] = useState('');
+  const [email,    setEmail]    = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState('');
+  const [error,   setError]   = useState('');
   const [loading, setLoading] = useState(false);
+  const [registered, setRegistered] = useState(false);
+
+  useEffect(() => {
+    if (searchParams.get('registered') === '1') {
+      setRegistered(true);
+    }
+    const prefill = searchParams.get('email');
+    if (prefill) {
+      setEmail(prefill);
+    }
+  }, [searchParams]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError('');
     setLoading(true);
+
     try {
-      const res = await fetch(`${API}/api/auth/login/`, {
+      // Step 1: resolve the tenant from the email
+      const findRes = await fetch(`${API}/api/auth/find-tenant/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+
+      if (!findRes.ok) {
+        setError('No account found for this email address.');
+        return;
+      }
+
+      const { slug } = await findRes.json();
+
+      // Step 2: tenant-scoped login
+      const res = await fetch(`${API}/api/app/${slug}/auth/login/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
       });
+
       if (!res.ok) {
-        setError('Invalid email or password');
+        const body = await res.json().catch(() => ({}));
+        const msg  = (body as any)?.detail
+          ?? (body as any)?.non_field_errors?.[0]
+          ?? 'Invalid credentials';
+        setError(msg);
         return;
       }
+
       const data = await res.json();
-      authStorage.setTokens(data.access, data.refresh, data.user);
+      authStorage.setTokens(data.accessToken, data.refreshToken, data.user);
+      authStorage.setSlug(slug);
+
+      const from = searchParams.get('from') || `/app/${slug}/dashboard`;
       router.push(from);
     } catch {
       setError('Unable to connect. Please try again.');
@@ -42,6 +77,13 @@ function LoginPageContent() {
     }
   }
 
+  const inputBase = 'px-3 py-2.5 rounded-lg text-sm outline-none transition-colors w-full';
+  const inputStyle = {
+    border: '1.5px solid #E2E8F0',
+    color: '#0F172A',
+    backgroundColor: '#F8FAFC',
+  };
+
   return (
     <div className="flex min-h-screen">
       {/* Left — brand panel */}
@@ -49,26 +91,17 @@ function LoginPageContent() {
         className="hidden lg:flex flex-col justify-between w-1/2 p-12 relative overflow-hidden"
         style={{ backgroundColor: '#1C3355' }}
       >
-        {/* Decorative circles */}
-        <div
-          className="absolute -top-24 -right-24 rounded-full opacity-10"
-          style={{ width: 400, height: 400, backgroundColor: '#D95F0E' }}
-        />
-        <div
-          className="absolute -bottom-32 -left-32 rounded-full opacity-10"
-          style={{ width: 500, height: 500, backgroundColor: '#0D9488' }}
-        />
-        <div
-          className="absolute top-1/2 right-0 -translate-y-1/2 rounded-full opacity-5"
-          style={{ width: 300, height: 300, backgroundColor: '#fff' }}
-        />
+        <div className="absolute -top-24 -right-24 rounded-full opacity-10"
+          style={{ width: 400, height: 400, backgroundColor: '#D95F0E' }} />
+        <div className="absolute -bottom-32 -left-32 rounded-full opacity-10"
+          style={{ width: 500, height: 500, backgroundColor: '#0D9488' }} />
+        <div className="absolute top-1/2 right-0 -translate-y-1/2 rounded-full opacity-5"
+          style={{ width: 300, height: 300, backgroundColor: '#fff' }} />
 
         {/* Logo */}
         <div className="relative z-10 flex items-center gap-3">
-          <div
-            className="flex items-center justify-center rounded-xl"
-            style={{ width: 44, height: 44, backgroundColor: '#D95F0E' }}
-          >
+          <div className="flex items-center justify-center rounded-xl"
+            style={{ width: 44, height: 44, backgroundColor: '#D95F0E' }}>
             <ChefHat size={24} color="#fff" />
           </div>
           <span className="text-white font-bold text-lg">CateringOS</span>
@@ -92,9 +125,8 @@ function LoginPageContent() {
           </div>
         </div>
 
-        {/* Bottom */}
         <p className="relative z-10 text-xs" style={{ color: 'rgba(255,255,255,0.3)' }}>
-          © {new Date().getFullYear()} Afsal Catering. All rights reserved.
+          © {new Date().getFullYear()} CateringOS. All rights reserved.
         </p>
       </div>
 
@@ -103,10 +135,8 @@ function LoginPageContent() {
         <div className="w-full" style={{ maxWidth: 380 }}>
           {/* Mobile logo */}
           <div className="flex lg:hidden items-center gap-2 mb-8">
-            <div
-              className="flex items-center justify-center rounded-lg"
-              style={{ width: 36, height: 36, backgroundColor: '#1C3355' }}
-            >
+            <div className="flex items-center justify-center rounded-lg"
+              style={{ width: 36, height: 36, backgroundColor: '#1C3355' }}>
               <ChefHat size={18} color="#fff" />
             </div>
             <span className="font-bold text-base" style={{ color: '#1C3355' }}>CateringOS</span>
@@ -115,9 +145,18 @@ function LoginPageContent() {
           <h2 className="font-bold mb-1" style={{ fontSize: 26, color: '#0F172A' }}>
             Welcome back
           </h2>
-          <p className="text-sm mb-8" style={{ color: '#64748B' }}>
-            Sign in to your account to continue
+          <p className="text-sm mb-6" style={{ color: '#64748B' }}>
+            Enter your credentials to continue.
           </p>
+
+          {/* Registration success banner */}
+          {registered && (
+            <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm mb-6"
+              style={{ backgroundColor: '#F0FDF4', color: '#16a34a', border: '1px solid #BBF7D0' }}>
+              <CheckCircle2 size={16} />
+              Account created! Please sign in.
+            </div>
+          )}
 
           <form onSubmit={handleSubmit} className="flex flex-col gap-5">
             {/* Email */}
@@ -132,14 +171,10 @@ function LoginPageContent() {
                 value={email}
                 onChange={e => setEmail(e.target.value)}
                 placeholder="you@example.com"
-                className="px-3 py-2.5 rounded-lg text-sm outline-none transition-colors"
-                style={{
-                  border: '1.5px solid #E2E8F0',
-                  color: '#0F172A',
-                  backgroundColor: '#F8FAFC',
-                }}
+                className={inputBase}
+                style={inputStyle}
                 onFocus={e => (e.currentTarget.style.borderColor = '#D95F0E')}
-                onBlur={e => (e.currentTarget.style.borderColor = '#E2E8F0')}
+                onBlur={e =>  (e.currentTarget.style.borderColor = '#E2E8F0')}
               />
             </div>
 
@@ -156,14 +191,10 @@ function LoginPageContent() {
                   value={password}
                   onChange={e => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="w-full px-3 py-2.5 pr-10 rounded-lg text-sm outline-none transition-colors"
-                  style={{
-                    border: '1.5px solid #E2E8F0',
-                    color: '#0F172A',
-                    backgroundColor: '#F8FAFC',
-                  }}
+                  className={`${inputBase} pr-10`}
+                  style={inputStyle}
                   onFocus={e => (e.currentTarget.style.borderColor = '#D95F0E')}
-                  onBlur={e => (e.currentTarget.style.borderColor = '#E2E8F0')}
+                  onBlur={e =>  (e.currentTarget.style.borderColor = '#E2E8F0')}
                 />
                 <button
                   type="button"
@@ -178,10 +209,8 @@ function LoginPageContent() {
 
             {/* Error */}
             {error && (
-              <div
-                className="px-3 py-2.5 rounded-lg text-sm"
-                style={{ backgroundColor: '#FEF2F2', color: '#DC2626', border: '1px solid #FECACA' }}
-              >
+              <div className="px-3 py-2.5 rounded-lg text-sm"
+                style={{ backgroundColor: '#FEF2F2', color: '#DC2626', border: '1px solid #FECACA' }}>
                 {error}
               </div>
             )}

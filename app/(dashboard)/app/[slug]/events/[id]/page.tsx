@@ -906,19 +906,19 @@ export default function EventDetailPage() {
 
   async function handleCancel() {
     try {
-      await api.post(`/events/${id}/transition/`, { status: 'CANCELLED' });
+      await api.patch(`/events/${id}/`, { status: 'CANCELLED' });
       toast.success('Event cancelled');
       qc.invalidateQueries({ queryKey: ['event', id] });
       setCancelConfirm(false);
-    } catch (err) { toast.error((err as { data?: { detail?: string } })?.data?.detail ?? 'Failed to cancel event'); }
+    } catch { toast.error('Failed to cancel event'); }
   }
 
   async function handleMarkComplete() {
     try {
-      await api.post(`/events/${id}/transition/`, { status: 'COMPLETED' });
+      await api.patch(`/events/${id}/`, { status: 'COMPLETED' });
       toast.success('Event marked as completed');
       qc.invalidateQueries({ queryKey: ['event', id] });
-    } catch (err) { toast.error((err as { data?: { detail?: string } })?.data?.detail ?? 'Failed to update event'); }
+    } catch { toast.error('Failed to update event'); }
   }
 
 
@@ -1082,18 +1082,16 @@ export default function EventDetailPage() {
 
             {/* Row 4: Action buttons */}
             <div className="flex items-center gap-2 mt-4 flex-wrap">
-              {(VALID_TRANSITIONS[e.status] ?? []).includes('CONFIRMED') && (
-                <button
-                  onClick={handleMarkConfirmed}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold bg-green-600 text-white hover:bg-green-700 transition-colors"
-                >
-                  <Check size={15} /> Mark Confirmed
-                </button>
-              )}
+              <button
+                onClick={handleMarkConfirmed}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold bg-green-600 text-white hover:bg-green-700 transition-colors"
+              >
+                <Check size={15} /> Mark Confirmed
+              </button>
               <button className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold bg-indigo-600 text-white hover:bg-indigo-700 transition-colors">
                 <CreditCard size={15} /> Add Payment
               </button>
-              {/* <button className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border border-gray-200 text-gray-700 hover:bg-gray-50 transition-colors">
+              <button className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border border-gray-200 text-gray-700 hover:bg-gray-50 transition-colors">
                 <Mail size={15} /> Send Reminder
               </button>
               <button
@@ -1101,7 +1099,7 @@ export default function EventDetailPage() {
                 className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border border-gray-200 text-gray-700 hover:bg-gray-50 transition-colors"
               >
                 <Users size={15} /> Assign Staff
-              </button> */}
+              </button>
               <div ref={moreRef} className="relative ml-auto">
                 <button
                   onClick={() => setMoreOpen(v => !v)}
