@@ -4,7 +4,7 @@ import { useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { ChefHat, Eye, EyeOff, Loader2, CheckCircle2 } from 'lucide-react';
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API = process.env.NEXT_PUBLIC_API_URL;
 
 const COUNTRIES = [
   { value: 'IN', label: 'India' },

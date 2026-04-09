@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { ChefHat, Eye, EyeOff, Loader2, CheckCircle2 } from 'lucide-react';
 import { authStorage } from '@/lib/auth';
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API = process.env.NEXT_PUBLIC_API_URL;
 
 function LoginPageContent() {
   const router       = useRouter();
