@@ -4,15 +4,14 @@ import { useState, useEffect, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import {
-  Plus, Search, Pencil, ArrowRightCircle, Trash2,
-  ChevronLeft, ChevronRight, X, Loader2, FileSpreadsheet, Users, Eye,
+  Plus, Search, Pencil, Trash2,
+  ChevronLeft, ChevronRight, X, Loader2, FileSpreadsheet, Users,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '@/lib/api';
 import { EVENT_TYPES } from '@/lib/constants';
 import { Skeleton } from '@/components/ui/skeleton';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Lead {
   id: string;
@@ -27,19 +26,17 @@ interface Lead {
   source_channel?: string;
   notes?: string;
   created_at: string;
-  converted_event?: { id: string; event_code: string } | null;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const STATUSES = ['All', 'NEW', 'QUALIFIED', 'FOLLOW_UP', 'CONVERTED', 'LOST'];
+const STATUSES = ['All', 'NEW', 'QUALIFIED', 'FOLLOW_UP', 'REJECTED'];
 
 const STATUS_STYLE: Record<string, { bg: string; color: string }> = {
   NEW:        { bg: '#EFF6FF', color: '#3B82F6' },
   QUALIFIED:  { bg: '#F5F3FF', color: '#7C3AED' },
   FOLLOW_UP:  { bg: '#FFF7ED', color: '#F97316' },
-  CONVERTED:  { bg: '#ECFDF5', color: '#0D9488' },
-  LOST:       { bg: '#FEF2F2', color: '#DC2626' },
+  REJECTED:   { bg: '#FEF2F2', color: '#DC2626' },
 };
 
 const SOURCE_CHANNELS = [
@@ -435,7 +432,7 @@ function LeadDrawer({
                 value={form.status} onChange={e => set('status', e.target.value)}
                 onFocus={e => (e.currentTarget.style.borderColor = '#D95F0E')}
                 onBlur={e => (e.currentTarget.style.borderColor = '#E2E8F0')}>
-                {['NEW', 'QUALIFIED', 'FOLLOW_UP', 'CONVERTED', 'LOST'].map(s =>
+                {['NEW', 'QUALIFIED', 'FOLLOW_UP', 'REJECTED'].map(s =>
                   <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
               </select>
             </div>
@@ -496,9 +493,6 @@ export default function LeadsPage() {
   // Detail modal state
   const [detailLead, setDetailLead] = useState<Lead | null>(null);
 
-  // Convert loading
-  const [convertingId, setConvertingId] = useState<string | null>(null);
-
   const queryString = new URLSearchParams({
     ...(search ? { search } : {}),
     ...(dateFrom ? { tentative_date_after: dateFrom } : {}),
@@ -547,24 +541,6 @@ export default function LeadsPage() {
     } finally {
       setDeleting(false);
       setDeleteTarget(null);
-    }
-  }
-
-  async function handleConvert(lead: Lead) {
-    setConvertingId(lead.id);
-    try {
-      const res = await api.post(`/inquiries/${lead.id}/convert/`, {});
-      toast.success('Lead converted to event!');
-      qc.invalidateQueries({ queryKey: ['leads'] });
-      qc.invalidateQueries({ queryKey: ['events'] });
-      const eventId = res?.id;
-      if (eventId) router.push(`/events/${eventId}`);
-      else router.push('/events');
-    } catch (err: unknown) {
-      const e = err as { data?: { detail?: string; error?: string } };
-      toast.error(e?.data?.detail ?? e?.data?.error ?? 'Failed to convert lead');
-    } finally {
-      setConvertingId(null);
     }
   }
 
@@ -731,24 +707,6 @@ export default function LeadsPage() {
                           title="Edit">
                           <Pencil size={14} style={{ color: '#64748B' }} />
                         </button>
-                        {lead.status === 'CONVERTED' && lead.converted_event?.id ? (
-                          <button
-                            onClick={() => router.push(`/events/${lead.converted_event!.id}`)}
-                            className="p-1.5 rounded-lg transition-colors hover:bg-teal-50"
-                            title="View Event">
-                            <Eye size={14} style={{ color: '#0D9488' }} />
-                          </button>
-                        ) : lead.status !== 'CONVERTED' && lead.status !== 'LOST' && (
-                          <button
-                            onClick={() => handleConvert(lead)}
-                            disabled={convertingId === lead.id}
-                            className="p-1.5 rounded-lg transition-colors hover:bg-teal-50"
-                            title="Convert to Event">
-                            {convertingId === lead.id
-                              ? <Loader2 size={14} className="animate-spin" style={{ color: '#0D9488' }} />
-                              : <ArrowRightCircle size={14} style={{ color: '#0D9488' }} />}
-                          </button>
-                        )}
                         <button onClick={() => setDeleteTarget(lead)}
                           className="p-1.5 rounded-lg transition-colors hover:bg-red-50"
                           title="Delete">

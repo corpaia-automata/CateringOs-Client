@@ -6,26 +6,15 @@ import { useParams, useRouter } from 'next/navigation';
 import {
   ArrowLeft, Pencil, Trash2, Plus, Eye, Download, Phone, Mail,
   Users, Calendar, MapPin, IndianRupee, ChevronDown, Loader2,
-  MoreHorizontal, FileText, CalendarDays, Info, X, Check,
-  MessageSquare, UserPlus,
+  MoreHorizontal, FileText, CalendarDays, Info, X,
+  MessageSquare, UserPlus, Zap, Star, Clock, Bell, TrendingUp,
+  PhoneCall, CheckCircle, ArrowRight, Activity, Flame,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '@/lib/api';
 import { EVENT_TYPES } from '@/lib/constants';
-import { Skeleton } from '@/components/ui/skeleton';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
-
-interface ConvertedEvent {
-  id: string;
-  event_code?: string;
-  venue?: string;
-  event_date?: string;
-  guest_count: number;
-  total_amount?: string | number;
-  status: string;
-  created_at: string;
-}
 
 interface LeadDetail {
   id: string;
@@ -41,41 +30,72 @@ interface LeadDetail {
   notes?: string;
   created_at: string;
   updated_at: string;
-  converted_event?: ConvertedEvent | null;
 }
 
-interface Quotation {
+interface PreEstimate {
   id: string;
-  version: number;
+  inquiry: string;
+  event_type: string;
+  service_type: string;
+  location: string;
+  guest_count: number;
+  target_margin: number;
+  total_cost: string | number;
+  total_quote: string | number;
+  total_profit: string | number;
   created_at: string;
-  total_amount: string | number;
-  status: string;
-  event: string;
+  updated_at: string;
 }
+
+// ─── Design Tokens ─────────────────────────────────────────────────────────────
+
+const C = {
+  surface:   '#0F1629',
+  card:      'white',
+  cardHover: '#182040',
+  border:    'rgba(255,255,255,0.07)',
+  borderHi:  'rgba(255,255,255,0.14)',
+  text:      'black',
+  muted:     '#64748B',
+  faint:     '#334155',
+  orange:    '#F97316',
+  orangeDim: 'rgba(249,115,22,0.15)',
+  teal:      '#14B8A6',
+  tealDim:   'rgba(20,184,166,0.15)',
+  blue:      '#3B82F6',
+  blueDim:   'rgba(59,130,246,0.15)',
+  purple:    '#8B5CF6',
+  purpleDim: 'rgba(139,92,246,0.15)',
+  green:     '#22C55E',
+  greenDim:  'rgba(34,197,94,0.15)',
+  red:       '#EF4444',
+  redDim:    'rgba(239,68,68,0.15)',
+  yellow:    '#EAB308',
+  yellowDim: 'rgba(234,179,8,0.15)',
+};
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
-const STATUS_STYLE: Record<string, { bg: string; color: string }> = {
-  NEW:        { bg: '#EFF6FF', color: '#3B82F6' },
-  QUALIFIED:  { bg: '#F5F3FF', color: '#7C3AED' },
-  FOLLOW_UP:  { bg: '#FFF7ED', color: '#F97316' },
-  CONVERTED:  { bg: '#ECFDF5', color: '#0D9488' },
-  LOST:       { bg: '#FEF2F2', color: '#DC2626' },
+const STATUS_CONFIG: Record<string, { color: string; bg: string; label: string; glow: string }> = {
+  NEW:       { color: C.blue,   bg: C.blueDim,   label: 'New',       glow: 'rgba(59,130,246,0.25)' },
+  QUALIFIED: { color: C.purple, bg: C.purpleDim, label: 'Qualified', glow: 'rgba(139,92,246,0.25)' },
+  FOLLOW_UP: { color: C.yellow, bg: C.yellowDim, label: 'Follow Up', glow: 'rgba(234,179,8,0.25)' },
+  REJECTED:  { color: C.red,    bg: C.redDim,    label: 'Rejected',  glow: 'rgba(239,68,68,0.25)' },
 };
 
-const QUOTATION_STATUS_STYLE: Record<string, { bg: string; color: string }> = {
-  DRAFT:    { bg: '#F1F5F9', color: '#64748B' },
-  SENT:     { bg: '#ECFDF5', color: '#0D9488' },
-  ACCEPTED: { bg: '#F0FDF4', color: '#16A34A' },
-  REJECTED: { bg: '#FEF2F2', color: '#DC2626' },
+const LEAD_TEMP: Record<string, { icon: typeof Flame; color: string; label: string }> = {
+  NEW:       { icon: Flame,  color: C.blue,   label: 'New Lead' },
+  QUALIFIED: { icon: Star,   color: C.purple, label: 'Warm Lead' },
+  FOLLOW_UP: { icon: Flame,  color: C.orange, label: 'Hot Lead' },
+  REJECTED:  { icon: X,      color: C.red,    label: 'Rejected' },
 };
+
 
 const VALID_TRANSITIONS: Record<string, string[]> = {
-  NEW:        ['QUALIFIED', 'FOLLOW_UP', 'LOST'],
-  QUALIFIED:  ['FOLLOW_UP', 'CONVERTED', 'LOST'],
-  FOLLOW_UP:  ['QUALIFIED', 'CONVERTED', 'LOST'],
-  CONVERTED:  [],
-  LOST:       ['NEW'],
+  NEW:       ['QUALIFIED', 'FOLLOW_UP', 'REJECTED'],
+  QUALIFIED: ['FOLLOW_UP', 'REJECTED'],
+  FOLLOW_UP: ['QUALIFIED', 'REJECTED'],
+  REJECTED:  ['NEW'],
 };
 
 const SOURCE_CHANNELS: Record<string, string> = {
@@ -137,83 +157,146 @@ interface ActivityItem {
 
 function buildTimeline(lead: LeadDetail): ActivityItem[] {
   const items: ActivityItem[] = [];
-
-  // Initial enquiry
   items.push({
-    id: 'enquiry',
-    type: 'enquiry',
-    title: `Initial enquiry received via ${SOURCE_CHANNELS[lead.source_channel ?? ''] ?? 'Unknown'}`,
-    date: lead.created_at,
-    by: 'System',
+    id: 'enquiry', type: 'enquiry',
+    title: `Initial enquiry via ${SOURCE_CHANNELS[lead.source_channel ?? ''] ?? 'Unknown'}`,
+    date: lead.created_at, by: 'System',
   });
-
-  // Lead created
   const createdDate = new Date(lead.created_at);
   createdDate.setMinutes(createdDate.getMinutes() + 1);
-  items.push({
-    id: 'created',
-    type: 'created',
-    title: 'Lead created',
-    date: createdDate.toISOString(),
-    by: 'Staff',
-  });
-
-  // Converted
-  if (lead.status === 'CONVERTED' && lead.converted_event) {
-    items.push({
-      id: 'converted',
-      type: 'converted',
-      title: 'Lead converted to event',
-      date: lead.converted_event.created_at,
-      by: 'Staff',
-    });
-  }
-
+  items.push({ id: 'created', type: 'created', title: 'Lead created in system', date: createdDate.toISOString(), by: 'Staff' });
   return items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 }
 
-function ActivityIcon({ type }: { type: ActivityItem['type'] }) {
-  const iconMap = {
-    converted: { bg: '#ECFDF5', color: '#0D9488', Icon: Check },
-    created:   { bg: '#EFF6FF', color: '#3B82F6', Icon: UserPlus },
-    enquiry:   { bg: '#F5F3FF', color: '#7C3AED', Icon: MessageSquare },
-    updated:   { bg: '#FFF7ED', color: '#F97316', Icon: Pencil },
-  };
-  const { bg, color, Icon } = iconMap[type];
+// ─── Skeleton ──────────────────────────────────────────────────────────────────
+
+function LeadDetailSkeleton() {
   return (
-    <div className="flex items-center justify-center w-9 h-9 rounded-full shrink-0"
-      style={{ backgroundColor: bg }}>
-      <Icon size={15} style={{ color }} />
+    <div className="min-h-screen p-6" style={{ backgroundColor: C.bg }}>
+      <div className="flex items-center gap-2 mb-6">
+        <div className="h-4 w-20 rounded-lg animate-pulse" style={{ backgroundColor: C.card }} />
+        <div className="h-4 w-4 rounded animate-pulse" style={{ backgroundColor: C.card }} />
+        <div className="h-4 w-32 rounded-lg animate-pulse" style={{ backgroundColor: C.card }} />
+      </div>
+      <div className="grid gap-5 lg:grid-cols-[1fr_320px]">
+        <div className="flex flex-col gap-5">
+          {[160, 260, 300].map(h => (
+            <div key={h} className="rounded-2xl animate-pulse" style={{ height: h, backgroundColor: C.card, border: `1px solid ${C.border}` }} />
+          ))}
+        </div>
+        <div className="flex flex-col gap-4">
+          {[280, 180, 160].map(h => (
+            <div key={h} className="rounded-2xl animate-pulse" style={{ height: h, backgroundColor: C.card, border: `1px solid ${C.border}` }} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Reusable Components ────────────────────────────────────────────────────────
+
+function Card({ children, className = '', style = {} }: { children: React.ReactNode; className?: string; style?: React.CSSProperties }) {
+  return (
+    <div className={`rounded-2xl p-6 ${className}`}
+      style={{ backgroundColor: C.card, border: `1px solid ${C.border}`, ...style }}>
+      {children}
+    </div>
+  );
+}
+
+function StatItem({ icon: Icon, label, value, color }: { icon: React.ElementType; label: string; value: string; color?: string }) {
+  const accentColor = color ?? C.blue;
+  return (
+    <div className="flex items-center gap-3 p-3.5 rounded-xl transition-all duration-200 group cursor-default shadow-md" >
+      <div className="flex items-center justify-center w-9 h-9 rounded-xl shrink-0"
+        style={{ backgroundColor: `${accentColor}18`, border: `1px solid ${accentColor}30` }}>
+        <Icon size={16} style={{ color: accentColor }} />
+      </div>
+      <div className="min-w-0">
+        <p className="text-xs font-medium truncate" style={{ color: C.muted }}>{label}</p>
+        <p className="text-sm font-semibold truncate mt-0.5" style={{ color: C.text }}>{value}</p>
+      </div>
+    </div>
+  );
+}
+
+function ActionButton({
+  icon: Icon,
+  label,
+  onClick,
+  disabled = false,
+}: {
+  icon: React.ElementType;
+  label: string;
+  onClick?: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={`
+        w-full flex items-center gap-3 px-4 py-3 rounded-xl
+        text-sm font-medium
+        bg-white text-black border border-gray-500
+        hover:bg-gray-100 active:scale-[0.98]
+        transition-all duration-200
+        ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}
+      `}
+    >
+      <Icon size={16} />
+      <span>{label}</span>
+    </button>
+  );
+}
+
+function TimelineItem({ item, isFirst, isLast }: { item: ActivityItem; isFirst: boolean; isLast: boolean }) {
+  const iconMap = {
+    converted: { bg: C.tealDim,   color: C.teal,   Icon: CheckCircle },
+    created:   { bg: C.blueDim,   color: C.blue,   Icon: UserPlus },
+    enquiry:   { bg: C.purpleDim, color: C.purple, Icon: MessageSquare },
+    updated:   { bg: C.orangeDim, color: C.orange, Icon: Pencil },
+  };
+  const { bg, color, Icon } = iconMap[item.type];
+
+  return (
+    <div className="flex gap-4">
+      <div className="flex flex-col items-center">
+        <div className="flex items-center justify-center w-9 h-9 rounded-xl shrink-0 z-10"
+          style={{ backgroundColor: bg, border: `1px solid ${color}30`, boxShadow: isFirst ? `0 0 12px ${color}30` : 'none' }}>
+          <Icon size={15} style={{ color }} />
+        </div>
+        {!isLast && <div className="w-px flex-1 mt-1" style={{ background: `linear-gradient(to bottom, ${color}40, transparent)`, minHeight: 28 }} />}
+      </div>
+      <div className={`pb-5 flex-1 min-w-0 ${isFirst ? 'opacity-100' : 'opacity-70'}`}>
+        <p className="text-xs mb-1" style={{ color: C.muted }}>{fmtDateTime(item.date)}</p>
+        <p className="text-sm font-semibold" style={{ color: isFirst ? C.text : C.muted }}>{item.title}</p>
+        {item.subtitle && (
+          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium mt-1"
+            style={{ backgroundColor: C.tealDim, color: C.teal }}>{item.subtitle}</span>
+        )}
+        <p className="text-xs mt-1" style={{ color: C.faint }}>by {item.by}</p>
+      </div>
+      {isFirst && (
+        <div className="flex items-start pt-1">
+          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: C.orangeDim, color: C.orange }}>LATEST</span>
+        </div>
+      )}
     </div>
   );
 }
 
 // ─── Status Badge ───────────────────────────────────────────────────────────────
 
-function StatusBadge({ status, map }: { status: string; map: Record<string, { bg: string; color: string }> }) {
-  const s = map[status] ?? { bg: '#F1F5F9', color: '#64748B' };
+function StatusBadge({ status }: { status: string }) {
+  const s = STATUS_CONFIG[status] ?? { color: C.muted, bg: C.surface, label: status, glow: 'transparent' };
   return (
-    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold"
-      style={{ backgroundColor: s.bg, color: s.color }}>
-      {status.replace(/_/g, ' ')}
+    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold"
+      style={{ backgroundColor: s.bg, color: s.color, border: `1px solid ${s.color}30` }}>
+      <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: s.color }} />
+      {s.label}
     </span>
-  );
-}
-
-// ─── Snapshot Stat Cell ─────────────────────────────────────────────────────────
-
-function SnapCell({ icon: Icon, label, value }: { icon: React.ElementType; label: string; value: string }) {
-  return (
-    <div className="flex items-start gap-3 p-4 rounded-xl" style={{ border: '1px solid #E2E8F0', backgroundColor: '#F8FAFC' }}>
-      <div className="flex items-center justify-center w-9 h-9 rounded-lg shrink-0 mt-0.5"
-        style={{ backgroundColor: '#EFF6FF' }}>
-        <Icon size={16} style={{ color: '#3B82F6' }} />
-      </div>
-      <div>
-        <p className="text-xs font-medium mb-0.5" style={{ color: '#94A3B8' }}>{label}</p>
-        <p className="text-sm font-semibold" style={{ color: '#0F172A' }}>{value}</p>
-      </div>
-    </div>
   );
 }
 
@@ -223,42 +306,28 @@ function EditLeadDrawer({ lead, open, onClose, onSaved }: {
   lead: LeadDetail; open: boolean; onClose: () => void; onSaved: () => void;
 }) {
   const [form, setForm] = useState({
-    customer_name:    lead.customer_name,
-    contact_number:   lead.contact_number ?? '',
-    email:            lead.email ?? '',
-    source_channel:   lead.source_channel ?? 'PHONE_CALL',
-    event_type:       lead.event_type ?? '',
-    tentative_date:   lead.tentative_date ?? '',
-    guest_count:      String(lead.guest_count ?? ''),
-    estimated_budget: String(lead.estimated_budget ?? ''),
-    status:           lead.status,
-    notes:            lead.notes ?? '',
+    customer_name: lead.customer_name, contact_number: lead.contact_number ?? '',
+    email: lead.email ?? '', source_channel: lead.source_channel ?? 'PHONE_CALL',
+    event_type: lead.event_type ?? '', tentative_date: lead.tentative_date ?? '',
+    guest_count: String(lead.guest_count ?? ''), estimated_budget: String(lead.estimated_budget ?? ''),
+    status: lead.status, notes: lead.notes ?? '',
   });
   const [saving, setSaving] = useState(false);
   const drawerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (open) {
-      setForm({
-        customer_name:    lead.customer_name,
-        contact_number:   lead.contact_number ?? '',
-        email:            lead.email ?? '',
-        source_channel:   lead.source_channel ?? 'PHONE_CALL',
-        event_type:       lead.event_type ?? '',
-        tentative_date:   lead.tentative_date ?? '',
-        guest_count:      String(lead.guest_count ?? ''),
-        estimated_budget: String(lead.estimated_budget ?? ''),
-        status:           lead.status,
-        notes:            lead.notes ?? '',
-      });
-    }
+    if (open) setForm({
+      customer_name: lead.customer_name, contact_number: lead.contact_number ?? '',
+      email: lead.email ?? '', source_channel: lead.source_channel ?? 'PHONE_CALL',
+      event_type: lead.event_type ?? '', tentative_date: lead.tentative_date ?? '',
+      guest_count: String(lead.guest_count ?? ''), estimated_budget: String(lead.estimated_budget ?? ''),
+      status: lead.status, notes: lead.notes ?? '',
+    });
   }, [lead, open]);
 
   useEffect(() => {
     function handler(e: MouseEvent) {
-      if (open && drawerRef.current && !drawerRef.current.contains(e.target as Node)) {
-        onClose();
-      }
+      if (open && drawerRef.current && !drawerRef.current.contains(e.target as Node)) onClose();
     }
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
@@ -272,20 +341,15 @@ function EditLeadDrawer({ lead, open, onClose, onSaved }: {
     setSaving(true);
     try {
       await api.patch(`/inquiries/${lead.id}/`, {
-        customer_name:    form.customer_name,
-        contact_number:   form.contact_number || '',
-        email:            form.email || '',
-        source_channel:   form.source_channel,
-        event_type:       form.event_type || '',
-        tentative_date:   form.tentative_date || null,
-        guest_count:      form.guest_count ? parseInt(form.guest_count) : 1,
+        customer_name: form.customer_name, contact_number: form.contact_number || '',
+        email: form.email || '', source_channel: form.source_channel,
+        event_type: form.event_type || '', tentative_date: form.tentative_date || null,
+        guest_count: form.guest_count ? parseInt(form.guest_count) : 1,
         estimated_budget: form.estimated_budget || null,
-        status:           form.status,
-        notes:            form.notes || '',
+        status: form.status, notes: form.notes || '',
       });
       toast.success('Lead updated');
-      onSaved();
-      onClose();
+      onSaved(); onClose();
     } catch (err: unknown) {
       const e = err as { data?: Record<string, unknown[]> };
       const msg = e?.data ? Object.values(e.data).flat().join(', ') : 'Failed to update';
@@ -293,89 +357,110 @@ function EditLeadDrawer({ lead, open, onClose, onSaved }: {
     } finally { setSaving(false); }
   }
 
-  const inp = 'w-full px-3 py-2 rounded-lg text-sm outline-none transition-colors';
-  const ist = { border: '1.5px solid #E2E8F0', backgroundColor: '#F8FAFC', color: '#0F172A' };
-  const lbl = 'block text-xs font-medium mb-1';
+  const inp = 'w-full px-3 py-2.5 rounded-xl text-sm outline-none transition-all duration-200';
+  const ist: React.CSSProperties = { border: `1px solid ${C.border}`, backgroundColor: C.surface, color: C.text };
+  const lbl = 'block text-xs font-semibold mb-1.5 uppercase tracking-wide';
 
   return (
     <>
-      <div className="fixed inset-0 z-40 transition-opacity"
-        style={{ backgroundColor: 'rgba(15,23,42,0.4)', opacity: open ? 1 : 0, pointerEvents: open ? 'auto' : 'none' }} />
+      <div className="fixed inset-0 z-40 transition-opacity backdrop-blur-sm"
+        style={{  opacity: open ? 1 : 0, pointerEvents: open ? 'auto' : 'none' }} />
       <div ref={drawerRef} className="fixed top-0 right-0 h-full z-50 flex flex-col"
-        style={{ width: 460, backgroundColor: '#fff', transform: open ? 'translateX(0)' : 'translateX(100%)', boxShadow: '-4px 0 24px rgba(0,0,0,0.12)', transition: 'transform 0.25s ease' }}>
-
-        <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: '#E2E8F0' }}>
-          <h2 className="font-semibold text-base" style={{ color: '#0F172A' }}>Edit Lead</h2>
-          <button onClick={onClose} className="p-1 rounded-lg hover:bg-slate-100"><X size={18} style={{ color: '#64748B' }} /></button>
+        style={{ width: 480, backgroundColor: C.card, border: `1px solid ${C.border}`, transform: open ? 'translateX(0)' : 'translateX(100%)', boxShadow: '-8px 0 48px rgba(0,0,0,0.5)', transition: 'transform 0.25s ease' }}>
+        <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: `1px solid ${C.border}` }}>
+          <h2 className="font-bold text-base" style={{ color: C.text }}>Edit Lead</h2>
+          <button onClick={onClose} className="p-2 rounded-xl transition-colors" style={{ color: C.muted }}
+            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = C.surface; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; }}>
+            <X size={18} />
+          </button>
         </div>
-
         <form onSubmit={submit} className="flex-1 overflow-y-auto px-6 py-5 flex flex-col gap-4">
-
-          <div><label className={lbl} style={{ color: '#0F172A' }}>Customer Name <span style={{ color: '#DC2626' }}>*</span></label>
+          <div>
+            <label className={lbl} style={{ color: C.muted }}>Customer Name <span style={{ color: C.red }}>*</span></label>
             <input className={inp} style={ist} required value={form.customer_name} onChange={e => set('customer_name', e.target.value)}
-              onFocus={e => (e.currentTarget.style.borderColor = '#D95F0E')} onBlur={e => (e.currentTarget.style.borderColor = '#E2E8F0')} /></div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div><label className={lbl} style={{ color: '#0F172A' }}>Contact Number</label>
-              <input className={inp} style={ist} type="tel" value={form.contact_number} onChange={e => set('contact_number', e.target.value)}
-                onFocus={e => (e.currentTarget.style.borderColor = '#D95F0E')} onBlur={e => (e.currentTarget.style.borderColor = '#E2E8F0')} /></div>
-            <div><label className={lbl} style={{ color: '#0F172A' }}>Email</label>
-              <input className={inp} style={ist} type="email" value={form.email} onChange={e => set('email', e.target.value)}
-                onFocus={e => (e.currentTarget.style.borderColor = '#D95F0E')} onBlur={e => (e.currentTarget.style.borderColor = '#E2E8F0')} /></div>
+              onFocus={e => { e.currentTarget.style.borderColor = C.orange; e.currentTarget.style.boxShadow = `0 0 0 3px ${C.orangeDim}`; }}
+              onBlur={e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.boxShadow = 'none'; }} />
           </div>
-
-          <div><label className={lbl} style={{ color: '#0F172A' }}>Source Channel</label>
-            <div className="flex gap-3 mt-1">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={lbl} style={{ color: C.muted }}>Contact</label>
+              <input className={inp} style={ist} type="tel" value={form.contact_number} onChange={e => set('contact_number', e.target.value)}
+                onFocus={e => { e.currentTarget.style.borderColor = C.orange; e.currentTarget.style.boxShadow = `0 0 0 3px ${C.orangeDim}`; }}
+                onBlur={e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.boxShadow = 'none'; }} />
+            </div>
+            <div>
+              <label className={lbl} style={{ color: C.muted }}>Email</label>
+              <input className={inp} style={ist} type="email" value={form.email} onChange={e => set('email', e.target.value)}
+                onFocus={e => { e.currentTarget.style.borderColor = C.orange; e.currentTarget.style.boxShadow = `0 0 0 3px ${C.orangeDim}`; }}
+                onBlur={e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.boxShadow = 'none'; }} />
+            </div>
+          </div>
+          <div>
+            <label className={lbl} style={{ color: C.muted }}>Source Channel</label>
+            <div className="flex gap-2 mt-1">
               {SOURCE_CHANNEL_OPTIONS.map(ch => (
-                <label key={ch.value} className="flex items-center gap-1.5 cursor-pointer">
+                <label key={ch.value} className="flex items-center gap-2 px-3 py-2 rounded-xl cursor-pointer transition-all duration-150 flex-1 justify-center"
+                  style={{ border: `1px solid ${form.source_channel === ch.value ? C.orange : C.border}`, backgroundColor: form.source_channel === ch.value ? C.orangeDim : C.surface }}>
                   <input type="radio" name="edit_source_channel" value={ch.value}
-                    checked={form.source_channel === ch.value} onChange={() => set('source_channel', ch.value)}
-                    className="accent-[#D95F0E]" />
-                  <span className="text-xs" style={{ color: '#0F172A' }}>{ch.label}</span>
+                    checked={form.source_channel === ch.value} onChange={() => set('source_channel', ch.value)} className="sr-only" />
+                  <span className="text-xs font-medium" style={{ color: form.source_channel === ch.value ? C.orange : C.muted }}>{ch.label}</span>
                 </label>
               ))}
             </div>
           </div>
-
-          <div><label className={lbl} style={{ color: '#0F172A' }}>Event Type</label>
+          <div>
+            <label className={lbl} style={{ color: C.muted }}>Event Type</label>
             <select className={inp} style={ist} value={form.event_type} onChange={e => set('event_type', e.target.value)}
-              onFocus={e => (e.currentTarget.style.borderColor = '#D95F0E')} onBlur={e => (e.currentTarget.style.borderColor = '#E2E8F0')}>
+              onFocus={e => { e.currentTarget.style.borderColor = C.orange; }}
+              onBlur={e => { e.currentTarget.style.borderColor = C.border; }}>
               <option value="">Select event type</option>
               {EVENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-            </select></div>
-
+            </select>
+          </div>
           <div className="grid grid-cols-2 gap-3">
-            <div><label className={lbl} style={{ color: '#0F172A' }}>Tentative Date</label>
+            <div>
+              <label className={lbl} style={{ color: C.muted }}>Tentative Date</label>
               <input className={inp} style={ist} type="date" value={form.tentative_date} onChange={e => set('tentative_date', e.target.value)}
-                onFocus={e => (e.currentTarget.style.borderColor = '#D95F0E')} onBlur={e => (e.currentTarget.style.borderColor = '#E2E8F0')} /></div>
-            <div><label className={lbl} style={{ color: '#0F172A' }}>Expected Guests</label>
+                onFocus={e => { e.currentTarget.style.borderColor = C.orange; }}
+                onBlur={e => { e.currentTarget.style.borderColor = C.border; }} />
+            </div>
+            <div>
+              <label className={lbl} style={{ color: C.muted }}>Guests</label>
               <input className={inp} style={ist} type="number" min="1" value={form.guest_count} onChange={e => set('guest_count', e.target.value)}
-                onFocus={e => (e.currentTarget.style.borderColor = '#D95F0E')} onBlur={e => (e.currentTarget.style.borderColor = '#E2E8F0')} /></div>
+                onFocus={e => { e.currentTarget.style.borderColor = C.orange; }}
+                onBlur={e => { e.currentTarget.style.borderColor = C.border; }} />
+            </div>
           </div>
-
           <div className="grid grid-cols-2 gap-3">
-            <div><label className={lbl} style={{ color: '#0F172A' }}>Estimated Budget (₹)</label>
+            <div>
+              <label className={lbl} style={{ color: C.muted }}>Budget (₹)</label>
               <input className={inp} style={ist} type="number" min="0" step="100" value={form.estimated_budget} onChange={e => set('estimated_budget', e.target.value)}
-                onFocus={e => (e.currentTarget.style.borderColor = '#D95F0E')} onBlur={e => (e.currentTarget.style.borderColor = '#E2E8F0')} /></div>
-            <div><label className={lbl} style={{ color: '#0F172A' }}>Status</label>
+                onFocus={e => { e.currentTarget.style.borderColor = C.orange; }}
+                onBlur={e => { e.currentTarget.style.borderColor = C.border; }} />
+            </div>
+            <div>
+              <label className={lbl} style={{ color: C.muted }}>Status</label>
               <select className={inp} style={ist} value={form.status} onChange={e => set('status', e.target.value)}
-                onFocus={e => (e.currentTarget.style.borderColor = '#D95F0E')} onBlur={e => (e.currentTarget.style.borderColor = '#E2E8F0')}
-                disabled={lead.status === 'CONVERTED'}>
-                {['NEW', 'QUALIFIED', 'FOLLOW_UP', 'CONVERTED', 'LOST'].map(s =>
+                onFocus={e => { e.currentTarget.style.borderColor = C.orange; }}
+                onBlur={e => { e.currentTarget.style.borderColor = C.border; }}>
+                {['NEW', 'QUALIFIED', 'FOLLOW_UP', 'REJECTED'].map(s =>
                   <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
-              </select></div>
+              </select>
+            </div>
           </div>
-
-          <div><label className={lbl} style={{ color: '#0F172A' }}>Notes</label>
+          <div>
+            <label className={lbl} style={{ color: C.muted }}>Notes</label>
             <textarea className={inp} style={{ ...ist, resize: 'vertical' }} rows={3} value={form.notes} onChange={e => set('notes', e.target.value)}
-              onFocus={e => (e.currentTarget.style.borderColor = '#D95F0E')} onBlur={e => (e.currentTarget.style.borderColor = '#E2E8F0')} /></div>
-
+              onFocus={e => { e.currentTarget.style.borderColor = C.orange; }}
+              onBlur={e => { e.currentTarget.style.borderColor = C.border; }} />
+          </div>
           <div className="flex items-center justify-end gap-3 pt-2 pb-4 mt-auto">
-            <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm font-medium"
-              style={{ color: '#64748B', border: '1px solid #E2E8F0' }}>Cancel</button>
+            <button type="button" onClick={onClose} className="px-4 py-2.5 rounded-xl text-sm font-medium"
+              style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancel</button>
             <button type="submit" disabled={saving}
-              className="flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold text-white"
-              style={{ backgroundColor: '#D95F0E', opacity: saving ? 0.7 : 1 }}>
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold text-white transition-all"
+              style={{ backgroundColor: C.orange, opacity: saving ? 0.7 : 1, boxShadow: `0 4px 16px ${C.orangeDim}` }}>
               {saving && <Loader2 size={14} className="animate-spin" />}
               {saving ? 'Saving…' : 'Update Lead'}
             </button>
@@ -392,21 +477,24 @@ function DeleteModal({ name, onConfirm, onCancel, loading }: {
   name: string; onConfirm: () => void; onCancel: () => void; loading: boolean;
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ backgroundColor: 'rgba(15,23,42,0.5)' }}>
-      <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm" style={{ border: '1px solid #E2E8F0' }}>
-        <div className="flex items-center justify-center w-12 h-12 rounded-full mb-4 mx-auto" style={{ backgroundColor: '#FEF2F2' }}>
-          <Trash2 size={22} style={{ color: '#DC2626' }} />
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4 backdrop-blur-sm"
+      style={{ backgroundColor: 'rgba(9,14,26,0.8)' }}>
+      <div className="rounded-2xl shadow-2xl p-6 w-full max-w-sm"
+        style={{ backgroundColor: C.card, border: `1px solid ${C.border}` }}>
+        <div className="flex items-center justify-center w-12 h-12 rounded-2xl mb-4 mx-auto"
+          style={{ backgroundColor: C.redDim, border: `1px solid ${C.red}30` }}>
+          <Trash2 size={22} style={{ color: C.red }} />
         </div>
-        <h3 className="text-base font-semibold text-center mb-1" style={{ color: '#0F172A' }}>Delete Lead</h3>
-        <p className="text-sm text-center mb-6" style={{ color: '#64748B' }}>
-          Are you sure you want to delete <span className="font-medium" style={{ color: '#0F172A' }}>"{name}"</span>? This cannot be undone.
+        <h3 className="text-base font-bold text-center mb-1" style={{ color: C.text }}>Delete Lead</h3>
+        <p className="text-sm text-center mb-6" style={{ color: C.muted }}>
+          Delete <span className="font-semibold" style={{ color: C.text }}>&ldquo;{name}&rdquo;</span>? This cannot be undone.
         </p>
         <div className="flex gap-3">
-          <button onClick={onCancel} className="flex-1 px-4 py-2 rounded-lg text-sm font-medium"
-            style={{ border: '1.5px solid #E2E8F0', color: '#64748B' }}>Cancel</button>
+          <button onClick={onCancel} className="flex-1 px-4 py-2.5 rounded-xl text-sm font-medium"
+            style={{ border: `1px solid ${C.border}`, color: C.muted }}>Cancel</button>
           <button onClick={onConfirm} disabled={loading}
-            className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white"
-            style={{ backgroundColor: '#DC2626', opacity: loading ? 0.7 : 1 }}>
+            className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold text-white"
+            style={{ backgroundColor: C.red, opacity: loading ? 0.7 : 1, boxShadow: `0 4px 16px ${C.redDim}` }}>
             {loading && <Loader2 size={14} className="animate-spin" />}
             Delete
           </button>
@@ -431,26 +519,27 @@ function StatusDropdown({ lead, onStatusChange }: { lead: LeadDetail; onStatusCh
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  const s = STATUS_STYLE[lead.status] ?? { bg: '#F1F5F9', color: '#64748B' };
+  const s = STATUS_CONFIG[lead.status] ?? { color: C.muted, bg: C.surface, glow: 'transparent' };
 
   return (
     <div ref={ref} className="relative">
-      <button
-        onClick={() => transitions.length > 0 && setOpen(o => !o)}
-        className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-semibold transition-opacity"
-        style={{ backgroundColor: s.bg, color: s.color, cursor: transitions.length > 0 ? 'pointer' : 'default' }}>
+      <button onClick={() => transitions.length > 0 && setOpen(o => !o)}
+        className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm font-bold transition-all"
+        style={{ backgroundColor: s.bg, color: s.color, border: `1px solid ${s.color}30`, cursor: transitions.length > 0 ? 'pointer' : 'default' }}>
         {lead.status.replace(/_/g, ' ')}
         {transitions.length > 0 && <ChevronDown size={14} />}
       </button>
       {open && transitions.length > 0 && (
-        <div className="absolute top-full left-0 mt-1 z-10 bg-white rounded-xl shadow-xl overflow-hidden"
-          style={{ minWidth: 160, border: '1px solid #E2E8F0' }}>
+        <div className="absolute top-full left-0 mt-2 z-20 rounded-xl overflow-hidden shadow-2xl"
+          style={{ minWidth: 180, backgroundColor: C.card, border: `1px solid ${C.border}` }}>
           {transitions.map(ns => {
-            const ns_s = STATUS_STYLE[ns] ?? { bg: '#F1F5F9', color: '#64748B' };
+            const ns_s = STATUS_CONFIG[ns] ?? { color: C.muted, bg: C.surface };
             return (
               <button key={ns}
-                className="w-full flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-left hover:bg-slate-50 transition-colors"
-                style={{ color: '#0F172A' }}
+                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-medium text-left transition-colors"
+                style={{ color: C.text }}
+                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = C.surface; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; }}
                 onClick={() => { onStatusChange(ns); setOpen(false); }}>
                 <span className="w-2 h-2 rounded-full" style={{ backgroundColor: ns_s.color }} />
                 {ns.replace(/_/g, ' ')}
@@ -473,57 +562,45 @@ export default function LeadDetailPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [newEstimateOpen, setNewEstimateOpen] = useState(false);
-  const [creatingEstimate, setCreatingEstimate] = useState(false);
   const [rowMenuOpen, setRowMenuOpen] = useState<string | null>(null);
   const rowMenuRef = useRef<HTMLDivElement>(null);
+  const [activeTab, setActiveTab] = useState<'pre-estimates' | 'quotations'>('pre-estimates');
 
-  // Close row menu on outside click
   useEffect(() => {
     function handler(e: MouseEvent) {
-      if (rowMenuRef.current && !rowMenuRef.current.contains(e.target as Node)) {
-        setRowMenuOpen(null);
-      }
+      if (rowMenuRef.current && !rowMenuRef.current.contains(e.target as Node)) setRowMenuOpen(null);
     }
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  // ── Queries ──
   const { data: lead, isLoading, isError } = useQuery<LeadDetail>({
     queryKey: ['lead', id],
     queryFn: () => api.get(`/inquiries/${id}/`),
     enabled: !!id,
   });
 
-  const convertedEventId = lead?.converted_event?.id;
-
-  const { data: quotationsData } = useQuery<{ results?: Quotation[]; count?: number } | Quotation[]>({
-    queryKey: ['lead-quotations', convertedEventId],
-    queryFn: () => api.get(`/quotations/?event=${convertedEventId}`),
-    enabled: !!convertedEventId,
+  const { data: preEstimatesData } = useQuery<{ results?: PreEstimate[] } | PreEstimate[]>({
+    queryKey: ['lead-preestimates', id],
+    queryFn: () => api.get(`/inquiries/preestimates/?inquiry=${id}`),
+    enabled: !!id,
   });
 
-  // Normalize quotations (paginated or plain array)
-  const allQuotations: Quotation[] = Array.isArray(quotationsData)
-    ? quotationsData
-    : (quotationsData?.results ?? []);
+  const allPreEstimates: PreEstimate[] = Array.isArray(preEstimatesData)
+    ? preEstimatesData : ((preEstimatesData as { results?: PreEstimate[] })?.results ?? []);
+  const sortedPreEstimates = [...allPreEstimates].sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  );
+  const displayedPreEstimates = sortedPreEstimates.slice(0, 3);
+  const latestPreEstimate = sortedPreEstimates[0];
 
-  // Sort by version desc (newest first)
-  const sortedQuotations = [...allQuotations].sort((a, b) => b.version - a.version);
-  const displayedQuotations = sortedQuotations.slice(0, 3);
-  const latestQuotation = sortedQuotations[0];
-
-  // ── Handlers ──
   async function handleStatusChange(newStatus: string) {
     if (!lead) return;
     try {
       await api.patch(`/inquiries/${lead.id}/`, { status: newStatus });
-      toast.success(`Status changed to ${newStatus.replace(/_/g, ' ')}`);
+      toast.success(`Status → ${newStatus.replace(/_/g, ' ')}`);
       qc.invalidateQueries({ queryKey: ['lead', id] });
-    } catch {
-      toast.error('Failed to update status');
-    }
+    } catch { toast.error('Failed to update status'); }
   }
 
   async function handleDelete() {
@@ -533,469 +610,512 @@ export default function LeadDetailPage() {
       await api.delete(`/inquiries/${lead.id}/`);
       toast.success('Lead deleted');
       router.push('/leads');
-    } catch {
-      toast.error('Failed to delete lead');
-    } finally { setDeleting(false); }
+    } catch { toast.error('Failed to delete lead'); }
+    finally { setDeleting(false); }
   }
 
-  async function handleNewEstimate() {
-    if (!convertedEventId) return;
-    setCreatingEstimate(true);
+  async function handleDownloadPdf(preEstimateId: string) {
     try {
-      await api.post('/quotations/', { event: convertedEventId });
-      toast.success('New pre-estimate created');
-      qc.invalidateQueries({ queryKey: ['lead-quotations', convertedEventId] });
-      setNewEstimateOpen(false);
-    } catch (err: unknown) {
-      const e = err as { data?: { detail?: string } };
-      toast.error(e?.data?.detail ?? 'Failed to create estimate');
-    } finally { setCreatingEstimate(false); }
+      await api.download(`/inquiries/preestimates/${preEstimateId}/export/`, `pre-estimate-${preEstimateId.slice(-6)}.pdf`);
+    } catch { toast.error('Failed to download PDF'); }
   }
 
-  async function handleDownloadPdf(quotationId: string) {
-    try {
-      await api.download(`/quotations/${quotationId}/pdf/`, `pre-estimate-${quotationId.slice(-6)}.pdf`);
-    } catch {
-      toast.error('Failed to download PDF');
-    }
-  }
-
-  // ── Loading / Error ──
   if (isLoading) return <LeadDetailSkeleton />;
   if (isError || !lead) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
-        <p className="text-base font-medium" style={{ color: '#64748B' }}>Lead not found.</p>
+      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4" style={{ backgroundColor: C.bg }}>
+        <p className="text-base font-medium" style={{ color: C.muted }}>Lead not found.</p>
         <button onClick={() => router.push('/leads')}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium"
-          style={{ backgroundColor: '#0F172A', color: '#fff' }}>
+          className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium"
+          style={{ backgroundColor: C.orange, color: '#fff' }}>
           <ArrowLeft size={16} /> Back to Leads
         </button>
       </div>
     );
   }
 
-  // ── Computed ──
   const timeline = buildTimeline(lead);
   const budgetPerPlate = lead.estimated_budget && lead.guest_count && lead.guest_count > 0
-    ? Math.round((typeof lead.estimated_budget === 'string' ? parseFloat(lead.estimated_budget) : lead.estimated_budget) / lead.guest_count)
-    : null;
-  const latestPerPlate = latestQuotation && lead.guest_count && lead.guest_count > 0
-    ? Math.round((typeof latestQuotation.total_amount === 'string' ? parseFloat(latestQuotation.total_amount) : latestQuotation.total_amount) / lead.guest_count)
-    : null;
+    ? Math.round((typeof lead.estimated_budget === 'string' ? parseFloat(lead.estimated_budget) : lead.estimated_budget) / lead.guest_count) : null;
+  const latestPerPlate = latestPreEstimate && lead.guest_count && lead.guest_count > 0
+    ? Math.round((typeof latestPreEstimate.total_quote === 'string' ? parseFloat(latestPreEstimate.total_quote) : latestPreEstimate.total_quote) / lead.guest_count) : null;
   const showBudgetAlert = budgetPerPlate !== null && latestPerPlate !== null && latestPerPlate !== budgetPerPlate;
-
-  const eventGuests = lead.converted_event?.guest_count ?? lead.guest_count;
-  const expectedPriceStr = latestQuotation
-    ? perPlate(latestQuotation.total_amount, eventGuests ?? 0)
-    : 'Not Set';
+  const eventGuests = lead.guest_count;
+  const expectedPriceStr = latestPreEstimate ? perPlate(latestPreEstimate.total_quote, eventGuests ?? 0) : 'Not Set';
+  const leadTemp = LEAD_TEMP[lead.status];
+  const TempIcon = leadTemp?.icon ?? Flame;
 
   return (
-    <>
-      {/* Overlay / Drawers */}
+    <div className="min-h-screen" style={{ backgroundColor: C.bg }}>
+      {/* Overlays / Drawers */}
       {editOpen && (
-        <EditLeadDrawer
-          lead={lead}
-          open={editOpen}
-          onClose={() => setEditOpen(false)}
-          onSaved={() => qc.invalidateQueries({ queryKey: ['lead', id] })}
-        />
+        <EditLeadDrawer lead={lead} open={editOpen} onClose={() => setEditOpen(false)}
+          onSaved={() => qc.invalidateQueries({ queryKey: ['lead', id] })} />
       )}
       {deleteOpen && (
-        <DeleteModal
-          name={lead.customer_name}
-          onConfirm={handleDelete}
-          onCancel={() => setDeleteOpen(false)}
-          loading={deleting}
-        />
+        <DeleteModal name={lead.customer_name} onConfirm={handleDelete}
+          onCancel={() => setDeleteOpen(false)} loading={deleting} />
       )}
+      <div className="max-w-screen-2xl mx-auto px-4 py-5">
 
-      {/* New Estimate Confirm Modal */}
-      {newEstimateOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ backgroundColor: 'rgba(15,23,42,0.5)' }}>
-          <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm" style={{ border: '1px solid #E2E8F0' }}>
-            <div className="flex items-center justify-center w-12 h-12 rounded-full mb-4 mx-auto" style={{ backgroundColor: '#ECFDF5' }}>
-              <FileText size={22} style={{ color: '#0D9488' }} />
-            </div>
-            <h3 className="text-base font-semibold text-center mb-1" style={{ color: '#0F172A' }}>New Pre-Estimate</h3>
-            <p className="text-sm text-center mb-6" style={{ color: '#64748B' }}>
-              This will create a new pre-estimate (version {sortedQuotations.length + 1}) for this lead.
-            </p>
-            <div className="flex gap-3">
-              <button onClick={() => setNewEstimateOpen(false)} className="flex-1 px-4 py-2 rounded-lg text-sm font-medium"
-                style={{ border: '1.5px solid #E2E8F0', color: '#64748B' }}>Cancel</button>
-              <button onClick={handleNewEstimate} disabled={creatingEstimate}
-                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white"
-                style={{ backgroundColor: '#0D9488', opacity: creatingEstimate ? 0.7 : 1 }}>
-                {creatingEstimate && <Loader2 size={14} className="animate-spin" />}
-                Create
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className=" p-4 w-full mx-auto">
-
-        {/* ── Breadcrumb ── */}
-        <div className="flex items-center gap-2 mb-5">
+        {/* Breadcrumb */}
+        <div className="flex items-center gap-2 mb-6">
           <button onClick={() => router.push('/leads')}
-            className="flex items-center gap-1.5 text-sm font-medium transition-colors hover:opacity-70"
-            style={{ color: '#64748B' }}>
-            <ArrowLeft size={16} /> Leads
+            className="flex items-center gap-1.5 text-sm font-medium transition-all duration-150 hover:opacity-70"
+            style={{ color: C.muted }}>
+            <ArrowLeft size={15} /> Leads
           </button>
-          <span style={{ color: '#CBD5E1' }}>/</span>
-          <span className="text-sm font-medium" style={{ color: '#0F172A' }}>{lead.customer_name}</span>
+          <span style={{ color: C.faint }}>/</span>
+          <span className="text-sm font-semibold" style={{ color: 'black' }}>{lead.customer_name}</span>
         </div>
 
-        {/* ── Profile Card ── */}
-        <div className="bg-white rounded-2xl mb-5 p-6" style={{ border: '1px solid #E2E8F0' }}>
-          <div className="flex flex-col lg:flex-row lg:items-start gap-6">
+        {/* Main Grid */}
+        <div className="grid gap-5 lg:grid-cols-[1fr_320px] items-start">
 
-            {/* Avatar + Info */}
-            <div className="flex items-start gap-4 flex-1">
-              <div className="flex items-center justify-center w-16 h-16 rounded-2xl font-bold text-xl text-white shrink-0"
-                style={{ backgroundColor: '#D95F0E' }}>
-                {initials(lead.customer_name)}
-              </div>
-              <div>
-                <div className="flex items-center gap-3 flex-wrap">
-                  <h1 className="text-2xl font-bold" style={{ color: '#0F172A' }}>{lead.customer_name}</h1>
-                  <StatusBadge status={lead.status} map={STATUS_STYLE} />
-                </div>
-                <p className="text-sm mt-1" style={{ color: '#64748B' }}>
-                  {lead.event_type || '—'}
-                  {lead.guest_count ? ` • ${lead.guest_count} Guests` : ''}
-                  {lead.tentative_date ? ` • ${fmtDate(lead.tentative_date)}` : ''}
-                  {lead.converted_event?.venue ? ` • ${lead.converted_event.venue}` : ''}
-                </p>
-                <div className="flex items-center gap-5 mt-2 flex-wrap">
-                  {lead.contact_number && (
-                    <span className="flex items-center gap-1.5 text-sm" style={{ color: '#475569' }}>
-                      <Phone size={14} style={{ color: '#94A3B8' }} />
-                      {lead.contact_number}
-                    </span>
-                  )}
-                  {lead.email && (
-                    <span className="flex items-center gap-1.5 text-sm" style={{ color: '#475569' }}>
-                      <Mail size={14} style={{ color: '#94A3B8' }} />
-                      {lead.email}
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
+          {/* ══════════════════════ LEFT MAIN CONTENT ══════════════════════ */}
+          <div className="flex flex-col gap-5 min-w-0">
 
-            {/* Lead Status */}
-            <div className="flex flex-col gap-1 min-w-[160px]">
-              <p className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: '#94A3B8' }}>Lead Status</p>
-              <StatusDropdown lead={lead} onStatusChange={handleStatusChange} />
-              {lead.status === 'CONVERTED' && lead.converted_event && (
-                <p className="text-xs mt-1" style={{ color: '#94A3B8' }}>
-                  Converted on {fmtDate(lead.converted_event.created_at)}
-                </p>
-              )}
-            </div>
+            {/* ── Hero Header Card ── */}
+            <Card>
+              <div className="flex flex-col lg:flex-row lg:items-start gap-6">
 
-            {/* Actions */}
-            <div className="flex flex-col gap-1">
-              <p className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: '#94A3B8' }}>Actions</p>
-              <div className="flex items-center gap-2 flex-wrap">
-                <button onClick={() => setEditOpen(true)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors hover:bg-slate-50"
-                  style={{ border: '1.5px solid #E2E8F0', color: '#0F172A' }}>
-                  <Pencil size={14} /> Edit
-                </button>
-                <button onClick={() => setDeleteOpen(true)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
-                  style={{ border: '1.5px solid #FEE2E2', color: '#DC2626', backgroundColor: '#FEF2F2' }}>
-                  <Trash2 size={14} /> Delete
-                </button>
-                <button
-                  onClick={() => lead.converted_event ? setNewEstimateOpen(true) : toast.error('Convert lead to event first')}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold text-white transition-opacity"
-                  style={{ backgroundColor: '#0F172A', opacity: lead.converted_event ? 1 : 0.5 }}>
-                  <Plus size={14} /> Create Pre-Estimate
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* ── Two Column Layout ── */}
-        <div className="grid gap-5 lg:grid-cols-[1fr_340px]">
-
-          {/* ── Left Column ── */}
-          <div className="flex flex-col gap-5">
-
-            {/* Event Snapshot */}
-            <div className="bg-white rounded-2xl p-6" style={{ border: '1px solid #E2E8F0' }}>
-              <div className="flex items-center gap-2 mb-4">
-                <CalendarDays size={18} style={{ color: '#0F172A' }} />
-                <h2 className="text-base font-semibold" style={{ color: '#0F172A' }}>Event Snapshot</h2>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <SnapCell icon={FileText} label="Event Type" value={lead.event_type || '—'} />
-                <SnapCell icon={Users} label="Guests" value={lead.guest_count ? `${lead.guest_count} Pax` : '—'} />
-                <SnapCell icon={Calendar} label="Date" value={fmtDate(lead.converted_event?.event_date ?? lead.tentative_date)} />
-                <SnapCell icon={MapPin} label="Location" value={lead.converted_event?.venue || '—'} />
-                <SnapCell icon={IndianRupee} label="Budget (Client)" value={fmtINR(lead.estimated_budget)} />
-                <SnapCell icon={IndianRupee} label="Expected Price" value={expectedPriceStr} />
-              </div>
-            </div>
-
-            {/* Pre-Estimates — only for converted leads */}
-            {lead.converted_event && (
-              <div className="bg-white rounded-2xl p-6" style={{ border: '1px solid #E2E8F0' }}>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <FileText size={18} style={{ color: '#0F172A' }} />
-                    <h2 className="text-base font-semibold" style={{ color: '#0F172A' }}>Pre-Estimates</h2>
-                  </div>
-                  <button onClick={() => setNewEstimateOpen(true)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold text-white"
-                    style={{ backgroundColor: '#0D9488' }}>
-                    <Plus size={14} /> New Pre-Estimate
-                  </button>
-                </div>
-
-                {sortedQuotations.length === 0 ? (
-                  <div className="text-center py-10" style={{ color: '#94A3B8' }}>
-                    <FileText size={32} className="mx-auto mb-2 opacity-30" />
-                    <p className="text-sm">No pre-estimates yet. Create your first one.</p>
-                  </div>
-                ) : (
-                  <>
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr style={{ borderBottom: '1px solid #E2E8F0' }}>
-                            {['#', 'Date', 'Guests', 'Per Plate', 'Total Amount', 'Status', 'Actions'].map(h => (
-                              <th key={h} className="text-left py-2 px-3 text-xs font-semibold uppercase tracking-wide"
-                                style={{ color: '#94A3B8' }}>{h}</th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {displayedQuotations.map(q => {
-                            const qGuests = eventGuests ?? 0;
-                            const qs = QUOTATION_STATUS_STYLE[q.status] ?? { bg: '#F1F5F9', color: '#64748B' };
-                            return (
-                              <tr key={q.id} style={{ borderBottom: '1px solid #F1F5F9' }}
-                                className="hover:bg-slate-50 transition-colors">
-                                <td className="py-3 px-3 font-medium" style={{ color: '#0F172A' }}>{q.version}</td>
-                                <td className="py-3 px-3" style={{ color: '#475569' }}>{fmtDate(q.created_at)}</td>
-                                <td className="py-3 px-3" style={{ color: '#475569' }}>{qGuests}</td>
-                                <td className="py-3 px-3 font-medium" style={{ color: '#0F172A' }}>{perPlate(q.total_amount, qGuests)}</td>
-                                <td className="py-3 px-3 font-medium" style={{ color: '#0F172A' }}>{fmtINR(q.total_amount)}</td>
-                                <td className="py-3 px-3">
-                                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold"
-                                    style={{ backgroundColor: qs.bg, color: qs.color }}>
-                                    {q.status}
-                                  </span>
-                                </td>
-                                <td className="py-3 px-3">
-                                  <div className="flex items-center gap-1">
-                                    <button title="View"
-                                      onClick={() => router.push(`/events/${convertedEventId}`)}
-                                      className="p-1.5 rounded-lg hover:bg-slate-100 transition-colors">
-                                      <Eye size={15} style={{ color: '#64748B' }} />
-                                    </button>
-                                    <button title="Download PDF"
-                                      onClick={() => handleDownloadPdf(q.id)}
-                                      className="p-1.5 rounded-lg hover:bg-slate-100 transition-colors">
-                                      <Download size={15} style={{ color: '#64748B' }} />
-                                    </button>
-                                    <button title="Edit"
-                                      onClick={() => router.push(`/events/${convertedEventId}`)}
-                                      className="p-1.5 rounded-lg hover:bg-slate-100 transition-colors">
-                                      <Pencil size={15} style={{ color: '#64748B' }} />
-                                    </button>
-                                    <div className="relative" ref={rowMenuOpen === q.id ? rowMenuRef : undefined}>
-                                      <button
-                                        onClick={() => setRowMenuOpen(rowMenuOpen === q.id ? null : q.id)}
-                                        className="p-1.5 rounded-lg hover:bg-slate-100 transition-colors">
-                                        <MoreHorizontal size={15} style={{ color: '#64748B' }} />
-                                      </button>
-                                      {rowMenuOpen === q.id && (
-                                        <div className="absolute right-0 top-full mt-1 z-10 bg-white rounded-xl shadow-xl overflow-hidden"
-                                          style={{ minWidth: 140, border: '1px solid #E2E8F0' }}>
-                                          <button onClick={() => { router.push(`/events/${convertedEventId}`); setRowMenuOpen(null); }}
-                                            className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-left hover:bg-slate-50"
-                                            style={{ color: '#0F172A' }}>
-                                            <Eye size={14} /> View Event
-                                          </button>
-                                          <button onClick={() => { handleDownloadPdf(q.id); setRowMenuOpen(null); }}
-                                            className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-left hover:bg-slate-50"
-                                            style={{ color: '#0F172A' }}>
-                                            <Download size={14} /> Download PDF
-                                          </button>
-                                        </div>
-                                      )}
-                                    </div>
-                                  </div>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
+                {/* Avatar + Info */}
+                <div className="flex items-start gap-5 flex-1 min-w-0">
+                  {/* Avatar */}
+                  <div className="relative shrink-0">
+                    <div className="flex items-center justify-center w-18 h-18 rounded-2xl font-black text-xl text-black"
+                      style={{ background: `linear-gradient(135deg, ${C.orange}, #fb923c)`, boxShadow: `0 8px 32px ${C.orangeDim}` }}>
+                      {initials(lead.customer_name)}
                     </div>
-                    <div className="flex items-center justify-between mt-3 pt-3" style={{ borderTop: '1px solid #F1F5F9' }}>
-                      <p className="text-xs" style={{ color: '#94A3B8' }}>
-                        Showing 1-{displayedQuotations.length} of {sortedQuotations.length}
-                      </p>
-                      {sortedQuotations.length > 3 && (
-                        <button onClick={() => router.push(`/events/${convertedEventId}`)}
-                          className="flex items-center gap-1 text-xs font-semibold"
-                          style={{ color: '#0D9488' }}>
-                          View All Estimates →
-                        </button>
+                    <div className="absolute -bottom-1.5 -right-1.5 flex items-center justify-center w-6 h-6 rounded-lg"
+                      style={{ backgroundColor: STATUS_CONFIG[lead.status]?.color ?? C.muted, boxShadow: `0 2px 8px ${STATUS_CONFIG[lead.status]?.glow ?? 'transparent'}` }}>
+                      <TempIcon size={12} color="#fff" />
+                    </div>
+                  </div>
+
+                  {/* Details */}
+                  <div className="min-w-0">
+                    <h1 className="text-2xl font-black tracking-tight truncate" style={{ color: 'black' }}>
+                      {lead.customer_name}
+                    </h1>
+                    <p className="text-sm mt-1 truncate" style={{ color: C.muted }}>
+                      {lead.event_type || '—'}
+                      {lead.guest_count ? ` · ${lead.guest_count} Guests` : ''}
+                      {lead.tentative_date ? ` · ${fmtDate(lead.tentative_date)}` : ''}
+                    </p>
+                    <div className="flex items-center gap-4 mt-3 flex-wrap">
+                      {lead.contact_number && (
+                        <a href={`tel:${lead.contact_number}`}
+                          className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm font-medium transition-all duration-150 text-black"
+                          style={{ border: `1px solid ${C.border}` }}
+                          onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = C.borderHi; }}
+                          onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = C.border; }}>
+                          <Phone size={14} style={{ color: C.green }} />
+                          {lead.contact_number}
+                        </a>
+                      )}
+                      {lead.email && (
+                        <a href={`mailto:${lead.email}`}
+                          className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm font-medium transition-all duration-150"
+                          style={{ color: C.text, border: `1px solid ${C.border}` }}
+                          onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = C.borderHi; }}
+                          onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = C.border; }}>
+                          <Mail size={14} style={{ color: C.blue }} />
+                          {lead.email}
+                        </a>
                       )}
                     </div>
-                  </>
-                )}
-              </div>
-            )}
+                  </div>
+                </div>
 
-            {/* Budget vs Estimate Alert */}
+                {/* Right: Status + CTA */}
+                <div className="flex flex-col gap-3 shrink-0">
+                  <div className="flex items-center gap-2">
+                    <StatusDropdown lead={lead} onStatusChange={handleStatusChange} />
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button onClick={() => setEditOpen(true)}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium transition-all duration-150"
+                      style={{ backgroundColor: 'GrayText', color: C.text, border: `1px solid ${C.border}` }}
+                      onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = C.borderHi; }}
+                      onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = C.border; }}>
+                      <Pencil size={14} /> Edit
+                    </button>
+                    <button onClick={() => setDeleteOpen(true)}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium transition-all duration-150"
+                      style={{ backgroundColor: C.redDim, color: C.red, border: `1px solid ${C.red}30` }}>
+                      <Trash2 size={14} /> Delete
+                    </button>
+                    <button
+                      onClick={() => router.push(`/leads/${id}/pre-estimate`)}
+                      className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold text-white transition-all duration-200"
+                      style={{ background: `linear-gradient(135deg, ${C.orange}, #fb923c)`, boxShadow: `0 4px 16px ${C.orangeDim}` }}
+                      onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-1px)'; (e.currentTarget as HTMLButtonElement).style.boxShadow = `0 8px 24px rgba(249,115,22,0.4)`; }}
+                      onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(0)'; (e.currentTarget as HTMLButtonElement).style.boxShadow = `0 4px 16px ${C.orangeDim}`; }}>
+                      <Plus size={14} /> Create Pre-Estimate
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </Card>
+
+            {/* ── Event Information Grid ── */}
+            <Card>
+              <div className="flex items-center gap-2 mb-5">
+                <div className="w-8 h-8 rounded-xl flex items-center justify-center">
+                  <CalendarDays size={16} style={{ color: C.blue }} />
+                </div>
+                <h2 className="text-base font-bold" style={{ color: C.text }}>Event Information</h2>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                <StatItem icon={FileText}     label="Event Type"      value={lead.event_type || '—'}                                            color={C.blue} />
+                <StatItem icon={Users}        label="Guests"          value={lead.guest_count ? `${lead.guest_count} Pax` : '—'}               color={C.purple} />
+                <StatItem icon={Calendar}     label="Event Date"      value={fmtDate(lead.tentative_date)} color={C.orange} />
+                <StatItem icon={MapPin}       label="Location"        value={latestPreEstimate?.location || '—'} color={C.green} />
+                <StatItem icon={IndianRupee}  label="Client Budget"   value={fmtINR(lead.estimated_budget)}                                    color={C.yellow} />
+                <StatItem icon={TrendingUp}   label="Expected Price"  value={expectedPriceStr}                                                  color={C.teal} />
+              </div>
+            </Card>
+
+            {/* ── Activity Timeline ── */}
+            <Card>
+              <div className="flex items-center justify-between mb-5">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ backgroundColor: C.purpleDim }}>
+                    <Activity size={16} style={{ color: C.purple }} />
+                  </div>
+                  <h2 className="text-base font-bold" style={{ color: C.text }}>Activity Timeline</h2>
+                </div>
+                <span className="text-xs px-2.5 py-1 rounded-full font-medium" style={{ backgroundColor: C.surface, color: C.muted, border: `1px solid ${C.border}` }}>
+                  {timeline.length} events
+                </span>
+              </div>
+              <div className="flex flex-col">
+                {timeline.map((item, idx) => (
+                  <TimelineItem key={item.id} item={item} isFirst={idx === 0} isLast={idx === timeline.length - 1} />
+                ))}
+              </div>
+            </Card>
+
+            {/* ── Budget Alert ── */}
             {showBudgetAlert && budgetPerPlate !== null && latestPerPlate !== null && (
               <div className="rounded-2xl p-4 flex items-start justify-between gap-4"
-                style={{ border: '1px solid #FDE68A', backgroundColor: '#FFFBEB' }}>
+                style={{ border: `1px solid ${C.yellow}30`, backgroundColor: C.yellowDim }}>
                 <div className="flex items-start gap-3">
-                  <div className="flex items-center justify-center w-8 h-8 rounded-full shrink-0 mt-0.5"
-                    style={{ backgroundColor: '#FEF3C7' }}>
-                    <Info size={15} style={{ color: '#D97706' }} />
+                  <div className="flex items-center justify-center w-9 h-9 rounded-xl shrink-0"
+                    style={{ backgroundColor: `${C.yellow}20` }}>
+                    <Info size={16} style={{ color: C.yellow }} />
                   </div>
                   <div>
-                    <p className="text-sm font-semibold mb-0.5" style={{ color: '#92400E' }}>Budget vs Estimate</p>
-                    <p className="text-xs leading-relaxed" style={{ color: '#78350F' }}>
-                      Latest estimate per plate is ₹{latestPerPlate.toLocaleString('en-IN')} which is{' '}
-                      {latestPerPlate > budgetPerPlate ? 'above' : 'below'} client budget of ₹{budgetPerPlate.toLocaleString('en-IN')}.
-                      {latestPerPlate > budgetPerPlate && ' Consider adjusting menu or removing extras.'}
+                    <p className="text-sm font-bold mb-0.5" style={{ color: C.yellow }}>Budget vs Estimate Gap</p>
+                    <p className="text-xs leading-relaxed" style={{ color: C.muted }}>
+                      Latest estimate is ₹{latestPerPlate.toLocaleString('en-IN')}/plate —{' '}
+                      {latestPerPlate > budgetPerPlate ? 'above' : 'below'} client budget of ₹{budgetPerPlate.toLocaleString('en-IN')}/plate.
+                      {latestPerPlate > budgetPerPlate && ' Consider adjusting the menu.'}
                     </p>
                   </div>
                 </div>
-                <button onClick={() => router.push(`/events/${convertedEventId}`)}
-                  className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap"
-                  style={{ border: '1.5px solid #D97706', color: '#D97706' }}>
-                  View Suggestion
+                <button onClick={() => router.push(`/leads/${id}/pre-estimate`)}
+                  className="shrink-0 px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap"
+                  style={{ border: `1px solid ${C.yellow}40`, color: C.yellow }}>
+                  View Estimate
                 </button>
               </div>
             )}
 
-            {/* Notes */}
-            {lead.notes && (
-              <div className="bg-white rounded-2xl p-6" style={{ border: '1px solid #E2E8F0' }}>
-                <h2 className="text-base font-semibold mb-3" style={{ color: '#0F172A' }}>Notes</h2>
-                <p className="text-sm leading-relaxed p-3 rounded-lg" style={{ color: '#334155', backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0' }}>
-                  {lead.notes}
-                </p>
-              </div>
-            )}
-          </div>
-
-          {/* ── Right Sidebar: Activity Timeline ── */}
-          <div className="flex flex-col gap-5">
-            <div className="bg-white rounded-2xl p-6" style={{ border: '1px solid #E2E8F0' }}>
-              <div className="flex items-center justify-between mb-5">
-                <h2 className="text-base font-semibold" style={{ color: '#0F172A' }}>Activity Timeline</h2>
-                <button className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium"
-                  style={{ border: '1px solid #E2E8F0', color: '#64748B' }}>
-                  All Activities <ChevronDown size={12} />
-                </button>
-              </div>
-
-              <div className="flex flex-col gap-0">
-                {timeline.map((item, idx) => (
-                  <div key={item.id} className="flex gap-3">
-                    <div className="flex flex-col items-center">
-                      <ActivityIcon type={item.type} />
-                      {idx < timeline.length - 1 && (
-                        <div className="w-px flex-1 my-1" style={{ backgroundColor: '#E2E8F0', minHeight: 20 }} />
-                      )}
-                    </div>
-                    <div className="pb-5 flex-1 min-w-0">
-                      <p className="text-xs mb-0.5" style={{ color: '#94A3B8' }}>{fmtDateTime(item.date)}</p>
-                      <p className="text-sm font-medium" style={{ color: '#0F172A' }}>{item.title}</p>
-                      {item.subtitle && (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium mt-1"
-                          style={{ backgroundColor: '#ECFDF5', color: '#0D9488' }}>
-                          {item.subtitle}
-                        </span>
-                      )}
-                      <p className="text-xs mt-0.5" style={{ color: '#94A3B8' }}>by {item.by}</p>
-                    </div>
-                  </div>
+            {/* ── Notes & Pre-Estimates Tabs ── */}
+            <Card style={{ padding: 0, overflow: 'hidden' }}>
+              {/* Tab Bar */}
+              <div className="flex" style={{ borderBottom: `1px solid ${C.border}` }}>
+                {(['pre-estimates', 'quotations'] as const).map(tab => (
+                  <button key={tab} onClick={() => setActiveTab(tab)}
+                    className="flex-1 px-5 py-3.5 text-sm font-semibold transition-all duration-200 capitalize"
+                    style={{
+                      color: activeTab === tab ? C.orange : C.muted,
+                      borderBottom: activeTab === tab ? `2px solid ${C.orange}` : '2px solid transparent',
+                      backgroundColor: activeTab === tab ? C.orangeDim : 'transparent',
+                    }}>
+                    {tab === 'pre-estimates' ? 'Pre-Estimates' : 'Notes'} {tab === 'pre-estimates' && sortedPreEstimates.length > 0 && (
+                      <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full"
+                        style={{ backgroundColor: C.orangeDim, color: C.orange }}>{sortedPreEstimates.length}</span>
+                    )}
+                  </button>
                 ))}
               </div>
 
-              <button className="w-full mt-2 text-sm font-medium text-center py-2 rounded-lg hover:bg-slate-50 transition-colors"
-                style={{ color: '#64748B', border: '1px solid #E2E8F0' }}>
-                View Full Activity →
-              </button>
-            </div>
+              <div className="p-6">
+                {activeTab === 'pre-estimates' ? (
+                  <>
+                    <div className="flex items-center justify-between mb-4">
+                      <p className="text-xs font-medium" style={{ color: C.muted }}>
+                        {sortedPreEstimates.length === 0 ? 'No pre-estimates yet' : `Showing ${displayedPreEstimates.length} of ${sortedPreEstimates.length}`}
+                      </p>
+                      <button onClick={() => router.push(`/leads/${id}/pre-estimate`)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all"
+                        style={{ backgroundColor: C.tealDim, color: C.teal, border: `1px solid ${C.teal}30` }}>
+                        <Plus size={13} /> New
+                      </button>
+                    </div>
 
-            {/* Quick Info Card */}
-            <div className="bg-white rounded-2xl p-6" style={{ border: '1px solid #E2E8F0' }}>
-              <h2 className="text-sm font-semibold mb-4" style={{ color: '#0F172A' }}>Lead Info</h2>
-              <div className="flex flex-col gap-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs" style={{ color: '#94A3B8' }}>Source</span>
-                  <span className="text-xs font-medium" style={{ color: '#0F172A' }}>
-                    {SOURCE_CHANNELS[lead.source_channel ?? ''] ?? '—'}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs" style={{ color: '#94A3B8' }}>Created</span>
-                  <span className="text-xs font-medium" style={{ color: '#0F172A' }}>{fmtDate(lead.created_at)}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs" style={{ color: '#94A3B8' }}>Last Updated</span>
-                  <span className="text-xs font-medium" style={{ color: '#0F172A' }}>{fmtDate(lead.updated_at)}</span>
-                </div>
-                {lead.converted_event && (
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs" style={{ color: '#94A3B8' }}>Event Code</span>
-                    <button onClick={() => router.push(`/events/${convertedEventId}`)}
-                      className="text-xs font-semibold hover:underline" style={{ color: '#0D9488' }}>
-                      {lead.converted_event.event_code ?? '—'}
+                    {sortedPreEstimates.length === 0 ? (
+                      <div className="text-center py-12 rounded-xl" style={{ border: `1px dashed ${C.border}` }}>
+                        <FileText size={32} className="mx-auto mb-3 opacity-20" style={{ color: C.muted }} />
+                        <p className="text-sm font-medium" style={{ color: C.muted }}>No pre-estimates yet.</p>
+                        <button onClick={() => router.push(`/leads/${id}/pre-estimate`)}
+                          className="mt-3 text-sm font-semibold" style={{ color: C.teal }}>
+                          Create your first →
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto rounded-xl" style={{ border: `1px solid ${C.border}` }}>
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr style={{ borderBottom: `1px solid ${C.border}`, backgroundColor: C.surface }}>
+                              {['#', 'Date', 'Guests', 'Per Plate', 'Total', ''].map(h => (
+                                <th key={h} className="text-left py-2.5 px-4 text-xs font-bold uppercase tracking-wider"
+                                  style={{ color: C.muted }}>{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {displayedPreEstimates.map((pe, idx) => {
+                              const peGuests = pe.guest_count ?? eventGuests ?? 0;
+                              const isLatest = idx === 0;
+                              return (
+                                <tr key={pe.id}
+                                  style={{ borderBottom: `1px solid ${C.border}`, backgroundColor: isLatest ? `${C.orange}05` : 'transparent' }}
+                                  className="transition-colors"
+                                  onMouseEnter={e => { (e.currentTarget as HTMLTableRowElement).style.backgroundColor = C.surface; }}
+                                  onMouseLeave={e => { (e.currentTarget as HTMLTableRowElement).style.backgroundColor = isLatest ? `${C.orange}05` : 'transparent'; }}>
+                                  <td className="py-3.5 px-4 font-bold" style={{ color: isLatest ? C.orange : C.text }}>
+                                    #{sortedPreEstimates.length - idx} {isLatest && <span className="ml-1 text-[10px] px-1 py-0.5 rounded" style={{ backgroundColor: C.orangeDim, color: C.orange }}>LATEST</span>}
+                                  </td>
+                                  <td className="py-3.5 px-4" style={{ color: C.muted }}>{fmtDate(pe.created_at)}</td>
+                                  <td className="py-3.5 px-4" style={{ color: C.muted }}>{peGuests}</td>
+                                  <td className="py-3.5 px-4 font-semibold" style={{ color: C.text }}>{perPlate(pe.total_quote, peGuests)}</td>
+                                  <td className="py-3.5 px-4 font-bold" style={{ color: C.text }}>{fmtINR(pe.total_quote)}</td>
+                                  <td className="py-3.5 px-4">
+                                    <div className="flex items-center gap-1">
+                                      <button title="View" onClick={() => router.push(`/leads/${id}/pre-estimate`)}
+                                        className="p-1.5 rounded-lg transition-colors"
+                                        style={{ color: C.muted }}
+                                        onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = C.surface; (e.currentTarget as HTMLButtonElement).style.color = C.text; }}
+                                        onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = C.muted; }}>
+                                        <Eye size={15} />
+                                      </button>
+                                      <button title="Download" onClick={() => handleDownloadPdf(pe.id)}
+                                        className="p-1.5 rounded-lg transition-colors"
+                                        style={{ color: C.muted }}
+                                        onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = C.surface; (e.currentTarget as HTMLButtonElement).style.color = C.text; }}
+                                        onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = C.muted; }}>
+                                        <Download size={15} />
+                                      </button>
+                                      <div className="relative" ref={rowMenuOpen === pe.id ? rowMenuRef : undefined}>
+                                        <button onClick={() => setRowMenuOpen(rowMenuOpen === pe.id ? null : pe.id)}
+                                          className="p-1.5 rounded-lg transition-colors"
+                                          style={{ color: C.muted }}
+                                          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = C.surface; }}
+                                          onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; }}>
+                                          <MoreHorizontal size={15} />
+                                        </button>
+                                        {rowMenuOpen === pe.id && (
+                                          <div className="absolute right-0 top-full mt-1 z-10 rounded-xl overflow-hidden shadow-2xl"
+                                            style={{ minWidth: 160, backgroundColor: C.card, border: `1px solid ${C.border}` }}>
+                                            <button onClick={() => { router.push(`/leads/${id}/pre-estimate`); setRowMenuOpen(null); }}
+                                              className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-left"
+                                              style={{ color: C.text }}
+                                              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = C.surface; }}
+                                              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; }}>
+                                              <Eye size={14} /> View Estimate
+                                            </button>
+                                            <button onClick={() => { handleDownloadPdf(pe.id); setRowMenuOpen(null); }}
+                                              className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-left"
+                                              style={{ color: C.text }}
+                                              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = C.surface; }}
+                                              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; }}>
+                                              <Download size={14} /> Download PDF
+                                            </button>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                        {sortedPreEstimates.length > 3 && (
+                          <div className="px-4 py-3" style={{ borderTop: `1px solid ${C.border}` }}>
+                            <button onClick={() => router.push(`/leads/${id}/pre-estimate`)}
+                              className="flex items-center gap-1.5 text-xs font-bold"
+                              style={{ color: C.teal }}>
+                              View all {sortedPreEstimates.length} estimates <ArrowRight size={12} />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  /* Notes Tab */
+                  <div className="flex flex-col gap-4">
+                    <div className="rounded-xl p-4" style={{ border: `1px solid ${C.border}`, backgroundColor: C.surface }}>
+                      <p className="text-xs font-bold mb-2 uppercase tracking-wide" style={{ color: C.muted }}>Lead Notes</p>
+                      {lead.notes ? (
+                        <p className="text-sm leading-relaxed" style={{ color: C.text }}>{lead.notes}</p>
+                      ) : (
+                        <p className="text-sm italic" style={{ color: C.faint }}>No notes added yet. Edit the lead to add notes.</p>
+                      )}
+                    </div>
+                    <button onClick={() => setEditOpen(true)}
+                      className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 w-fit"
+                      style={{ backgroundColor: C.surface, color: C.text, border: `1px solid ${C.border}` }}
+                      onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = C.borderHi; }}
+                      onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = C.border; }}>
+                      <Pencil size={14} /> {lead.notes ? 'Edit Notes' : 'Add Notes'}
                     </button>
                   </div>
                 )}
               </div>
-            </div>
+            </Card>
+          </div>
+
+          {/* ══════════════════════ RIGHT SIDEBAR ══════════════════════ */}
+          <div className="flex flex-col gap-4 lg:sticky lg:top-5 self-start">
+
+            {/* ── Quick Actions ── */}
+            <Card>
+              <div className="flex items-center gap-2 mb-4">
+                <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: C.orangeDim }}>
+                  <Zap size={14} style={{ color: C.orange }} />
+                </div>
+                <h3 className="text-sm font-bold" style={{ color: C.text }}>Quick Actions</h3>
+              </div>
+              <div className="flex flex-col gap-2">
+                <ActionButton icon={PhoneCall}   label="Mark Contacted"
+                  onClick={() => handleStatusChange('FOLLOW_UP')}
+                  variant="ghost" disabled={lead.status === 'FOLLOW_UP'} />
+                <ActionButton icon={CheckCircle} label="Mark Qualified"
+                  onClick={() => handleStatusChange('QUALIFIED')}
+                  variant="secondary" disabled={lead.status === 'QUALIFIED'} />
+                <ActionButton icon={ArrowRight}  label="Move to Follow-Up"
+                  onClick={() => handleStatusChange('FOLLOW_UP')}
+                  variant="ghost" disabled={lead.status === 'FOLLOW_UP'} />
+
+                <div className="my-1" style={{ height: 1 }} />
+
+                <ActionButton icon={FileText}    label="Create Pre-Estimate"
+                  onClick={() => router.push(`/leads/${id}/pre-estimate`)}
+                  variant="primary" />
+                <ActionButton icon={Plus}        label="New Quotation"
+                  onClick={() => router.push(`/leads/${id}/pre-estimate`)}
+                  variant="secondary" />
+                <ActionButton icon={Bell}        label="Set Reminder"
+                  onClick={() => toast('Reminders coming soon')}
+                  variant="ghost" />
+              </div>
+            </Card>
+
+            {/* ── Stats ── */}
+            <Card>
+              <div className="flex items-center gap-2 mb-4">
+                <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: C.blueDim }}>
+                  <TrendingUp size={14} style={{ color: C.blue }} />
+                </div>
+                <h3 className="text-sm font-bold" style={{ color: C.text }}>Lead Stats</h3>
+              </div>
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center justify-between py-2" style={{ borderBottom: `1px solid ${C.border}` }}>
+                  <span className="text-xs font-medium" style={{ color: C.muted }}>Last Activity</span>
+                  <span className="text-xs font-semibold" style={{ color: C.text }}>{fmtDate(lead.updated_at)}</span>
+                </div>
+                <div className="flex items-center justify-between py-2" style={{ borderBottom: `1px solid ${C.border}` }}>
+                  <span className="text-xs font-medium" style={{ color: C.muted }}>Pre-Estimates</span>
+                  <span className="text-xs font-bold" style={{ color: C.teal }}>{sortedPreEstimates.length}</span>
+                </div>
+                <div className="flex items-center justify-between py-2" style={{ borderBottom: `1px solid ${C.border}` }}>
+                  <span className="text-xs font-medium" style={{ color: C.muted }}>Source</span>
+                  <span className="text-xs font-semibold" style={{ color: C.text }}>{SOURCE_CHANNELS[lead.source_channel ?? ''] ?? '—'}</span>
+                </div>
+                <div className="flex items-center justify-between py-2">
+                  <span className="text-xs font-medium" style={{ color: C.muted }}>Created</span>
+                  <span className="text-xs font-semibold" style={{ color: C.text }}>{fmtDate(lead.created_at)}</span>
+                </div>
+              </div>
+            </Card>
+
+            {/* ── Latest Pre-Estimate Summary ── */}
+            {latestPreEstimate && (
+              <Card>
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: C.tealDim }}>
+                    <FileText size={14} style={{ color: C.teal }} />
+                  </div>
+                  <h3 className="text-sm font-bold" style={{ color: C.text }}>Latest Estimate</h3>
+                </div>
+                <div className="rounded-xl p-4" style={{ backgroundColor: C.surface, border: `1px solid ${C.border}` }}>
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-xs font-bold px-2 py-0.5 rounded-full"
+                      style={{ backgroundColor: C.orangeDim, color: C.orange }}>#{sortedPreEstimates.length}</span>
+                    <span className="text-xs" style={{ color: C.muted }}>{fmtDate(latestPreEstimate.created_at)}</span>
+                  </div>
+                  <p className="text-2xl font-black mb-1" style={{ color: C.text }}>{fmtINR(latestPreEstimate.total_quote)}</p>
+                  <p className="text-xs mb-4" style={{ color: C.muted }}>
+                    {perPlate(latestPreEstimate.total_quote, eventGuests ?? 0)} per plate · {eventGuests ?? 0} guests
+                  </p>
+                  <button onClick={() => router.push(`/leads/${id}/pre-estimate`)}
+                    className="w-full flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-bold transition-all duration-150"
+                    style={{ backgroundColor: C.tealDim, color: C.teal, border: `1px solid ${C.teal}30` }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = `${C.teal}25`; }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = C.tealDim; }}>
+                    <Eye size={13} /> View Details
+                  </button>
+                </div>
+              </Card>
+            )}
+
+            {/* ── Next Follow-Up ── */}
+            {lead.tentative_date && (
+              <Card>
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: C.purpleDim }}>
+                    <Clock size={14} style={{ color: C.purple }} />
+                  </div>
+                  <h3 className="text-sm font-bold" style={{ color: C.text }}>Event Countdown</h3>
+                </div>
+                <div className="rounded-xl p-4" style={{ backgroundColor: C.surface, border: `1px solid ${C.border}` }}>
+                  {(() => {
+                    const eventDate = new Date(lead.tentative_date!);
+                    const today = new Date();
+                    const daysLeft = Math.ceil((eventDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+                    const progressPct = Math.max(0, Math.min(100, 100 - (daysLeft / 180) * 100));
+                    const isUrgent = daysLeft <= 14;
+                    const color = isUrgent ? C.red : daysLeft <= 30 ? C.orange : C.teal;
+                    return (
+                      <>
+                        <p className="text-2xl font-black mb-0.5" style={{ color }}>
+                          {daysLeft > 0 ? `${daysLeft}d` : daysLeft === 0 ? 'Today' : 'Past'}
+                        </p>
+                        <p className="text-xs mb-4" style={{ color: C.muted }}>
+                          {daysLeft > 0 ? 'until event · ' : 'event was · '}
+                          {fmtDate(lead.tentative_date)}
+                        </p>
+                        <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: C.border }}>
+                          <div className="h-full rounded-full transition-all duration-700"
+                            style={{ width: `${progressPct}%`, background: `linear-gradient(90deg, ${color}, ${color}80)` }} />
+                        </div>
+                        {isUrgent && daysLeft > 0 && (
+                          <p className="text-xs mt-2 font-semibold" style={{ color: C.red }}>Urgent — follow up now!</p>
+                        )}
+                      </>
+                    );
+                  })()}
+                </div>
+              </Card>
+            )}
           </div>
         </div>
-      </div>
-    </>
-  );
-}
-
-// ─── Skeleton Loader ────────────────────────────────────────────────────────────
-
-function LeadDetailSkeleton() {
-  return (
-    <div className="px-6 py-6 max-w-7xl mx-auto">
-      <Skeleton className="h-4 w-32 mb-5" />
-      <div className="bg-white rounded-2xl p-6 mb-5" style={{ border: '1px solid #E2E8F0' }}>
-        <div className="flex items-start gap-4">
-          <Skeleton className="w-16 h-16 rounded-2xl" />
-          <div className="flex-1">
-            <Skeleton className="h-7 w-48 mb-2" />
-            <Skeleton className="h-4 w-72 mb-2" />
-            <Skeleton className="h-4 w-40" />
-          </div>
-          <Skeleton className="h-8 w-28" />
-          <Skeleton className="h-8 w-36" />
-        </div>
-      </div>
-      <div className="grid gap-5 lg:grid-cols-[1fr_340px]">
-        <div className="flex flex-col gap-5">
-          <Skeleton className="h-52 rounded-2xl" />
-          <Skeleton className="h-64 rounded-2xl" />
-        </div>
-        <Skeleton className="h-96 rounded-2xl" />
       </div>
     </div>
   );

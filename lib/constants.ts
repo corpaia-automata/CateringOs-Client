@@ -22,8 +22,8 @@ export const SERVICE_TYPES = [
 export const STATUS_COLORS: Record<string, string> = {
   NEW: 'blue',
   QUALIFIED: 'purple',
-  CONVERTED: 'green',
-  LOST: 'red',
+  FOLLOW_UP: 'orange',
+  REJECTED: 'red',
 };
 
 export const EVENT_STATUS_COLORS: Record<string, string> = {
