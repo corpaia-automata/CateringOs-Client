@@ -4,15 +4,14 @@ import { useState, useEffect, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import {
-  Plus, Search, Pencil, ArrowRightCircle, Trash2,
-  ChevronLeft, ChevronRight, X, Loader2, FileSpreadsheet, Users, Eye,
+  Plus, Search, Pencil, Trash2,
+  ChevronLeft, ChevronRight, X, Loader2, FileSpreadsheet, Users,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '@/lib/api';
 import { EVENT_TYPES } from '@/lib/constants';
 import { Skeleton } from '@/components/ui/skeleton';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Lead {
   id: string;
@@ -27,19 +26,17 @@ interface Lead {
   source_channel?: string;
   notes?: string;
   created_at: string;
-  converted_event?: { id: string; event_code: string } | null;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const STATUSES = ['All', 'NEW', 'QUALIFIED', 'FOLLOW_UP', 'CONVERTED', 'LOST'];
+const STATUSES = ['All', 'NEW', 'QUALIFIED', 'FOLLOW_UP', 'REJECTED'];
 
 const STATUS_STYLE: Record<string, { bg: string; color: string }> = {
   NEW:        { bg: '#EFF6FF', color: '#3B82F6' },
   QUALIFIED:  { bg: '#F5F3FF', color: '#7C3AED' },
   FOLLOW_UP:  { bg: '#FFF7ED', color: '#F97316' },
-  CONVERTED:  { bg: '#ECFDF5', color: '#0D9488' },
-  LOST:       { bg: '#FEF2F2', color: '#DC2626' },
+  REJECTED:   { bg: '#FEF2F2', color: '#DC2626' },
 };
 
 const SOURCE_CHANNELS = [
@@ -243,6 +240,7 @@ function LeadDrawer({
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);
   const drawerRef = useRef<HTMLDivElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
 
   useEffect(() => {
     if (editing) {
@@ -312,9 +310,9 @@ function LeadDrawer({
     }
   }
 
-  const inputCls = "w-full px-3 py-2 rounded-lg text-sm outline-none transition-colors";
-  const inputStyle = { border: '1.5px solid #E2E8F0', backgroundColor: '#F8FAFC', color: '#0F172A' };
-  const labelCls = "block text-xs font-medium mb-1";
+  const inputCls = "w-full px-3 py-2.5 rounded-xl text-sm outline-none transition-colors";
+  const inputStyle = { border: '1.5px solid #CBD5E1', backgroundColor: '#FFFFFF', color: '#0F172A' };
+  const labelCls = "block text-xs font-semibold mb-1.5";
 
   return (
     <>
@@ -330,15 +328,23 @@ function LeadDrawer({
         ref={drawerRef}
         className="fixed top-0 right-0 h-full z-50 flex flex-col transition-transform"
         style={{
-          width: 440,
+          width: 480,
           backgroundColor: '#fff',
           transform: open ? 'translateX(0)' : 'translateX(100%)',
           boxShadow: '-4px 0 24px rgba(0,0,0,0.12)',
           transition: 'transform 0.25s ease',
         }}
       >
-        <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: '#E2E8F0' }}>
-          <h2 className="font-semibold text-base" style={{ color: '#0F172A' }}>
+        <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: '#E2E8F0', backgroundColor: '#F8FAFC' }}>
+          <div>
+            <h2 className="font-semibold text-base" style={{ color: '#0F172A' }}>
+              {editing ? 'Edit Lead' : 'Create New Lead'}
+            </h2>
+            <p className="text-xs mt-0.5" style={{ color: '#64748B' }}>
+              Fill the details clearly to avoid follow-up confusion.
+            </p>
+          </div>
+          <h2 className="font-semibold text-base hidden" style={{ color: '#0F172A' }}>
             {editing ? 'Edit Lead' : 'New Lead'}
           </h2>
           <button onClick={onClose} className="p-1 rounded-lg hover:bg-slate-100 transition-colors">
@@ -346,77 +352,84 @@ function LeadDrawer({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto px-6 py-5 flex flex-col gap-4">
+        <form ref={formRef} onSubmit={handleSubmit} className="flex-1 overflow-y-auto px-6 py-5 flex flex-col gap-4">
+          <div className="rounded-xl p-4 border" style={{ borderColor: '#E2E8F0', backgroundColor: '#F8FAFC' }}>
+            <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: '#475569' }}>Primary Contact</p>
 
-          <div>
-            <label className={labelCls} style={{ color: '#0F172A' }}>Customer Name <span style={{ color: '#DC2626' }}>*</span></label>
-            <input className={inputCls} style={inputStyle} required
-              value={form.customer_name} onChange={e => set('customer_name', e.target.value)}
-              placeholder="Full name"
-              onFocus={e => (e.currentTarget.style.borderColor = '#D95F0E')}
-              onBlur={e => (e.currentTarget.style.borderColor = '#E2E8F0')} />
+            <div>
+              <label className={labelCls} style={{ color: '#0F172A' }}>Customer Name <span style={{ color: '#DC2626' }}>*</span></label>
+              <input className={inputCls} style={inputStyle} required
+                value={form.customer_name} onChange={e => set('customer_name', e.target.value)}
+                placeholder="Full name"
+                onFocus={e => (e.currentTarget.style.borderColor = '#D95F0E')}
+                onBlur={e => (e.currentTarget.style.borderColor = '#CBD5E1')} />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 mt-3">
+              <div>
+                <label className={labelCls} style={{ color: '#0F172A' }}>Contact Number</label>
+                <input className={inputCls} style={inputStyle} type="tel"
+                  value={form.contact_number} onChange={e => set('contact_number', e.target.value)}
+                  placeholder="+91 9XXXXXXXXX"
+                  onFocus={e => (e.currentTarget.style.borderColor = '#D95F0E')}
+                  onBlur={e => (e.currentTarget.style.borderColor = '#CBD5E1')} />
+              </div>
+              <div>
+                <label className={labelCls} style={{ color: '#0F172A' }}>Email</label>
+                <input className={inputCls} style={inputStyle} type="email"
+                  value={form.email} onChange={e => set('email', e.target.value)}
+                  placeholder="email@example.com"
+                  onFocus={e => (e.currentTarget.style.borderColor = '#D95F0E')}
+                  onBlur={e => (e.currentTarget.style.borderColor = '#CBD5E1')} />
+              </div>
+            </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="rounded-xl p-4 border" style={{ borderColor: '#E2E8F0', backgroundColor: '#FFFFFF' }}>
+            <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: '#475569' }}>Event Details</p>
             <div>
-              <label className={labelCls} style={{ color: '#0F172A' }}>Contact Number</label>
-              <input className={inputCls} style={inputStyle} type="tel"
-                value={form.contact_number} onChange={e => set('contact_number', e.target.value)}
-                placeholder="+91 9XXXXXXXXX"
-                onFocus={e => (e.currentTarget.style.borderColor = '#D95F0E')}
-                onBlur={e => (e.currentTarget.style.borderColor = '#E2E8F0')} />
-            </div>
-            <div>
-              <label className={labelCls} style={{ color: '#0F172A' }}>Email</label>
-              <input className={inputCls} style={inputStyle} type="email"
-                value={form.email} onChange={e => set('email', e.target.value)}
-                placeholder="email@example.com"
-                onFocus={e => (e.currentTarget.style.borderColor = '#D95F0E')}
-                onBlur={e => (e.currentTarget.style.borderColor = '#E2E8F0')} />
-            </div>
-          </div>
-
-          <div>
-            <label className={labelCls} style={{ color: '#0F172A' }}>Source Channel</label>
-            <div className="flex gap-2 mt-1">
+              <label className={labelCls} style={{ color: '#0F172A' }}>Source Channel</label>
+              <div className="grid grid-cols-3 gap-2 mt-1">
               {SOURCE_CHANNELS.map(ch => (
-                <label key={ch.value} className="flex items-center gap-1.5 cursor-pointer">
+                <label key={ch.value} className="flex items-center gap-1.5 cursor-pointer rounded-lg px-2.5 py-2 border"
+                  style={{ borderColor: form.source_channel === ch.value ? '#FDBA74' : '#E2E8F0', backgroundColor: form.source_channel === ch.value ? '#FFF7ED' : '#F8FAFC' }}>
                   <input type="radio" name="source_channel" value={ch.value}
                     checked={form.source_channel === ch.value}
                     onChange={() => set('source_channel', ch.value)}
                     className="accent-[#D95F0E]" />
-                  <span className="text-xs" style={{ color: '#0F172A' }}>{ch.label}</span>
+                  <span className="text-xs font-medium" style={{ color: '#0F172A' }}>{ch.label}</span>
                 </label>
               ))}
+              </div>
             </div>
-          </div>
 
-          <div>
-            <label className={labelCls} style={{ color: '#0F172A' }}>Event Type</label>
-            <select className={inputCls} style={inputStyle}
-              value={form.event_type} onChange={e => set('event_type', e.target.value)}
-              onFocus={e => (e.currentTarget.style.borderColor = '#D95F0E')}
-              onBlur={e => (e.currentTarget.style.borderColor = '#E2E8F0')}>
-              <option value="">Select event type</option>
-              {EVENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={labelCls} style={{ color: '#0F172A' }}>Tentative Date</label>
-              <input className={inputCls} style={inputStyle} type="date"
-                value={form.tentative_date} onChange={e => set('tentative_date', e.target.value)}
+            <div className="mt-3">
+              <label className={labelCls} style={{ color: '#0F172A' }}>Event Type</label>
+              <select className={inputCls} style={inputStyle}
+                value={form.event_type} onChange={e => set('event_type', e.target.value)}
                 onFocus={e => (e.currentTarget.style.borderColor = '#D95F0E')}
-                onBlur={e => (e.currentTarget.style.borderColor = '#E2E8F0')} />
+                onBlur={e => (e.currentTarget.style.borderColor = '#CBD5E1')}>
+                <option value="">Select event type</option>
+                {EVENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
             </div>
-            <div>
-              <label className={labelCls} style={{ color: '#0F172A' }}>Expected Guests</label>
-              <input className={inputCls} style={inputStyle} type="number" min="1"
-                value={form.guest_count} onChange={e => set('guest_count', e.target.value)}
-                placeholder="e.g. 200"
-                onFocus={e => (e.currentTarget.style.borderColor = '#D95F0E')}
-                onBlur={e => (e.currentTarget.style.borderColor = '#E2E8F0')} />
+
+            <div className="grid grid-cols-2 gap-3 mt-3">
+              <div>
+                <label className={labelCls} style={{ color: '#0F172A' }}>Tentative Date</label>
+                <input className={inputCls} style={inputStyle} type="date"
+                  value={form.tentative_date} onChange={e => set('tentative_date', e.target.value)}
+                  onFocus={e => (e.currentTarget.style.borderColor = '#D95F0E')}
+                  onBlur={e => (e.currentTarget.style.borderColor = '#CBD5E1')} />
+              </div>
+              <div>
+                <label className={labelCls} style={{ color: '#0F172A' }}>Expected Guests</label>
+                <input className={inputCls} style={inputStyle} type="number" min="1"
+                  value={form.guest_count} onChange={e => set('guest_count', e.target.value)}
+                  placeholder="e.g. 200"
+                  onFocus={e => (e.currentTarget.style.borderColor = '#D95F0E')}
+                  onBlur={e => (e.currentTarget.style.borderColor = '#CBD5E1')} />
+              </div>
             </div>
           </div>
 
@@ -427,15 +440,15 @@ function LeadDrawer({
                 value={form.estimated_budget} onChange={e => set('estimated_budget', e.target.value)}
                 placeholder="e.g. 50000"
                 onFocus={e => (e.currentTarget.style.borderColor = '#D95F0E')}
-                onBlur={e => (e.currentTarget.style.borderColor = '#E2E8F0')} />
+                onBlur={e => (e.currentTarget.style.borderColor = '#CBD5E1')} />
             </div>
             <div>
               <label className={labelCls} style={{ color: '#0F172A' }}>Status</label>
               <select className={inputCls} style={inputStyle}
                 value={form.status} onChange={e => set('status', e.target.value)}
                 onFocus={e => (e.currentTarget.style.borderColor = '#D95F0E')}
-                onBlur={e => (e.currentTarget.style.borderColor = '#E2E8F0')}>
-                {['NEW', 'QUALIFIED', 'FOLLOW_UP', 'CONVERTED', 'LOST'].map(s =>
+                onBlur={e => (e.currentTarget.style.borderColor = '#CBD5E1')}>
+                {['NEW', 'QUALIFIED', 'FOLLOW_UP', 'REJECTED'].map(s =>
                   <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
               </select>
             </div>
@@ -447,7 +460,7 @@ function LeadDrawer({
               rows={3} value={form.notes} onChange={e => set('notes', e.target.value)}
               placeholder="Additional notes..."
               onFocus={e => (e.currentTarget.style.borderColor = '#D95F0E')}
-              onBlur={e => (e.currentTarget.style.borderColor = '#E2E8F0')} />
+              onBlur={e => (e.currentTarget.style.borderColor = '#CBD5E1')} />
           </div>
         </form>
 
@@ -457,7 +470,7 @@ function LeadDrawer({
             Cancel
           </button>
           <button
-            onClick={() => { document.querySelector('form')?.requestSubmit(); }}
+            onClick={() => { formRef.current?.requestSubmit(); }}
             disabled={saving}
             className="flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold text-white transition-opacity"
             style={{ backgroundColor: '#D95F0E', opacity: saving ? 0.7 : 1 }}>
@@ -495,9 +508,6 @@ export default function LeadsPage() {
 
   // Detail modal state
   const [detailLead, setDetailLead] = useState<Lead | null>(null);
-
-  // Convert loading
-  const [convertingId, setConvertingId] = useState<string | null>(null);
 
   const queryString = new URLSearchParams({
     ...(search ? { search } : {}),
@@ -547,24 +557,6 @@ export default function LeadsPage() {
     } finally {
       setDeleting(false);
       setDeleteTarget(null);
-    }
-  }
-
-  async function handleConvert(lead: Lead) {
-    setConvertingId(lead.id);
-    try {
-      const res = await api.post(`/inquiries/${lead.id}/convert/`, {});
-      toast.success('Lead converted to event!');
-      qc.invalidateQueries({ queryKey: ['leads'] });
-      qc.invalidateQueries({ queryKey: ['events'] });
-      const eventId = res?.id;
-      if (eventId) router.push(`/events/${eventId}`);
-      else router.push('/events');
-    } catch (err: unknown) {
-      const e = err as { data?: { detail?: string; error?: string } };
-      toast.error(e?.data?.detail ?? e?.data?.error ?? 'Failed to convert lead');
-    } finally {
-      setConvertingId(null);
     }
   }
 
@@ -731,24 +723,6 @@ export default function LeadsPage() {
                           title="Edit">
                           <Pencil size={14} style={{ color: '#64748B' }} />
                         </button>
-                        {lead.status === 'CONVERTED' && lead.converted_event?.id ? (
-                          <button
-                            onClick={() => router.push(`/events/${lead.converted_event!.id}`)}
-                            className="p-1.5 rounded-lg transition-colors hover:bg-teal-50"
-                            title="View Event">
-                            <Eye size={14} style={{ color: '#0D9488' }} />
-                          </button>
-                        ) : lead.status !== 'CONVERTED' && lead.status !== 'LOST' && (
-                          <button
-                            onClick={() => handleConvert(lead)}
-                            disabled={convertingId === lead.id}
-                            className="p-1.5 rounded-lg transition-colors hover:bg-teal-50"
-                            title="Convert to Event">
-                            {convertingId === lead.id
-                              ? <Loader2 size={14} className="animate-spin" style={{ color: '#0D9488' }} />
-                              : <ArrowRightCircle size={14} style={{ color: '#0D9488' }} />}
-                          </button>
-                        )}
                         <button onClick={() => setDeleteTarget(lead)}
                           className="p-1.5 rounded-lg transition-colors hover:bg-red-50"
                           title="Delete">

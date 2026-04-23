@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { usePathname } from 'next/navigation';
-import { Search, Bell, ChevronRight, Menu } from 'lucide-react';
+import { Search, Bell, ChevronRight, Menu, User } from 'lucide-react';
 import Sidebar from './Sidebar';
 import { authStorage } from '@/lib/auth';
 
@@ -96,7 +96,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <header
           className="sticky top-0 z-30 flex items-center justify-between gap-3"
           style={{
-            height:       62,
+            height:       72,
             background:   'rgba(255,255,255,0.97)',
             borderBottom: '1px solid rgba(226,232,240,0.8)',
             paddingLeft:  16,
@@ -217,29 +217,29 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             <div className="hidden sm:block" style={{ width: 1, height: 24, background: '#E2E8F0' }} />
 
             {/* User avatar */}
-            <div className="flex items-center gap-2.5 cursor-pointer group">
-              <div
-                className="flex items-center justify-center rounded-xl font-bold transition-all duration-150 group-hover:scale-105 shrink-0"
-                style={{
-                  width:      34,
-                  height:     34,
-                  background: 'linear-gradient(135deg, #0D1B2E, #0F2040)',
-                  color:      '#fff',
-                  fontSize:   12,
-                  boxShadow:  '0 2px 8px rgba(13,27,46,0.2)',
-                }}
-              >
-                {initials}
+
+              <div className="flex items-center gap-2.5 cursor-pointer group">
+                <div
+                  className="flex items-center justify-center rounded-xl transition-all duration-150 group-hover:scale-105 shrink-0"
+                  style={{
+                    width: 34,
+                    height: 34,
+                    background: 'linear-gradient(135deg, #0D1B2E, #0F2040)',
+                    boxShadow: '0 2px 8px rgba(13,27,46,0.2)',
+                  }}
+                >
+                  <User size={16} color="#fff" />
+                </div>
+
+                {/* <div className="hidden md:block">
+                  <p className="text-xs font-semibold text-slate-800 leading-tight">
+                    {user?.full_name?.split(' ')[0] || 'User'}
+                  </p>
+                  <p className="text-[10px] text-slate-400 capitalize">
+                    {user?.role?.toLowerCase() || 'staff'}
+                  </p>
+                </div> */}
               </div>
-              <div className="hidden md:block">
-                <p className="text-xs font-semibold text-slate-800 leading-tight">
-                  {user?.full_name?.split(' ')[0] || 'User'}
-                </p>
-                <p className="text-[10px] text-slate-400 capitalize">
-                  {user?.role?.toLowerCase() || 'staff'}
-                </p>
-              </div>
-            </div>
 
           </div>
         </header>

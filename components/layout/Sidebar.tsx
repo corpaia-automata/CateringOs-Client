@@ -17,6 +17,7 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import { authStorage } from '@/lib/auth';
+import { useTenant } from '@/contexts/TenantContext';
 
 const NAV_PATHS = [
   { label: 'Dashboard',  path: 'dashboard', icon: LayoutDashboard },
@@ -40,12 +41,13 @@ type SidebarProps = {
 export default function Sidebar({ isOpen, isCollapsed, onClose, onToggle }: SidebarProps) {
   const pathname = usePathname();
   const router   = useRouter();
+  const { tenantSlug } = useTenant();
   useEffect(() => {
     document.body.style.overflow = isOpen ? 'hidden' : '';
     return () => { document.body.style.overflow = ''; };
   }, [isOpen]);
 
-  const slug = authStorage.getSlug() ?? '';
+  const slug = tenantSlug ?? '';
   const base = slug ? `/app/${slug}` : '';
   const NAV_ITEMS = NAV_PATHS.map(({ label, path, icon }) => ({
     label,
