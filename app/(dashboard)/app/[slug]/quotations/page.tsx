@@ -83,9 +83,9 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-// ─── Edit Modal ───────────────────────────────────────────────────────────────
+// ─── Pricing Panel (replaces EditModal) ──────────────────────────────────────
 
-function EditModal({
+function PricingPanel({
   quotation,
   onClose,
   onSaved,
@@ -94,129 +94,214 @@ function EditModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [status, setStatus]         = useState(quotation.status);
-  const [subtotal, setSubtotal]     = useState(quotation.subtotal);
-  const [svcCharge, setSvcCharge]   = useState(quotation.service_charge);
-  const [notes, setNotes]           = useState(quotation.notes);
-  const [saving, setSaving]         = useState(false);
+  const isDraft     = quotation.status === 'DRAFT';
+  const isFinalised = quotation.status === 'SENT' || quotation.status === 'ACCEPTED';
 
-  const totalAmount = (parseFloat(subtotal) || 0) + (parseFloat(svcCharge) || 0);
+  // Fix float precision from DB values
+  const internalCost = parseFloat(Number(quotation.subtotal).toFixed(2)) || 0;
+  const svcCharge    = parseFloat(Number(quotation.service_charge).toFixed(2)) || 0;
+  const menuTotal    = parseFloat((internalCost + svcCharge).toFixed(2));
 
-  async function handleSave() {
-    setSaving(true);
+  // Editable state — initialise from quotation total (precision-fixed)
+  const [sellingPrice, setSellingPrice]     = useState(
+    parseFloat(Number(quotation.total_amount || menuTotal).toFixed(2))
+  );
+  const [advanceAmount, setAdvanceAmount]   = useState('');
+  const [paymentTerms, setPaymentTerms]     = useState(quotation.notes || '');
+  const [finalising, setFinalising]         = useState(false);
+
+  // Summary numbers
+  const selling      = parseFloat(Number(sellingPrice).toFixed(2)) || 0;
+  const marginNum    = internalCost > 0 ? ((selling - internalCost) / internalCost) * 100 : null;
+  const marginPct    = marginNum !== null ? marginNum.toFixed(1) : null;
+  const marginNeg    = marginPct !== null && parseFloat(marginPct) < 0;
+
+  function fmtPrice(v: number) {
+    return '₹' + v.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  async function handleFinalise() {
+    setFinalising(true);
     try {
       await api.patch(`/quotations/${quotation.id}/`, {
-        status,
-        subtotal: parseFloat(subtotal) || 0,
-        service_charge: parseFloat(svcCharge) || 0,
-        total_amount: totalAmount,
-        notes,
+        status:       'SENT',
+        sent_at:      new Date().toISOString(),
+        total_amount: parseFloat(Number(sellingPrice).toFixed(2)),
+        notes:        paymentTerms,
       });
-      toast.success('Quotation updated');
+      toast.success('Quotation finalised & sent!');
       onSaved();
       onClose();
     } catch {
-      toast.error('Failed to update quotation');
+      toast.error('Failed to finalise quotation');
     } finally {
-      setSaving(false);
+      setFinalising(false);
     }
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ backgroundColor: 'rgba(15,23,42,0.55)' }}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full overflow-hidden" style={{ maxWidth: 480, border: '1px solid #E2E8F0' }}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ backgroundColor: 'rgba(15,23,42,0.6)' }}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full flex flex-col"
+        style={{ maxWidth: 540, maxHeight: '92vh', border: '1px solid #E2E8F0' }}>
 
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: '#E2E8F0', backgroundColor: '#F8FAFC' }}>
+        {/* ── Header ──────────────────────────────────────────────────────── */}
+        <div className="flex items-center justify-between px-6 py-4 shrink-0"
+          style={{ borderBottom: '1px solid #E2E8F0', backgroundColor: '#F8FAFC' }}>
           <div>
-            <h3 className="font-bold text-base" style={{ color: '#0F172A' }}>Edit Quotation</h3>
-            <p className="text-xs mt-0.5" style={{ color: '#64748B' }}>{quotation.quote_number} · {quotation.client_name}</p>
+            <h3 className="font-bold text-base" style={{ color: '#0F172A' }}>Pricing</h3>
+            <p className="text-xs mt-0.5" style={{ color: '#64748B' }}>
+              {quotation.quote_number} · {quotation.client_name} · Rev. {quotation.version}
+            </p>
           </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-200 transition-colors">
-            <X size={16} style={{ color: '#64748B' }} />
-          </button>
+          <div className="flex items-center gap-3">
+            <StatusBadge status={quotation.status} />
+            <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-200 transition-colors">
+              <X size={16} style={{ color: '#64748B' }} />
+            </button>
+          </div>
         </div>
 
-        {/* Body */}
-        <div className="px-6 py-5 space-y-4">
-          {/* Status */}
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wide mb-1.5" style={{ color: '#94A3B8' }}>Status</label>
-            <select
-              value={status}
-              onChange={e => setStatus(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg text-sm outline-none"
-              style={{ border: '1.5px solid #E2E8F0', color: '#0F172A' }}
+        {/* ── Scrollable Body ──────────────────────────────────────────────── */}
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+
+          {/* ── Top info cards ─────────────────────────────────────────────── */}
+          <div className="grid grid-cols-2 gap-3">
+            {/* INTERNAL COST */}
+            <div className="rounded-xl p-4" style={{ backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0' }}>
+              <p className="text-[10px] font-bold uppercase tracking-widest mb-0.5" style={{ color: '#64748B' }}>
+                Internal Cost
+              </p>
+              <p className="text-xs mb-2" style={{ color: '#94A3B8' }}>Total from costing sheet</p>
+              <p className="text-lg font-black" style={{ color: '#0F172A' }}>{fmtPrice(internalCost)}</p>
+            </div>
+            {/* CALCULATED FROM MENU */}
+            <div className="rounded-xl p-4" style={{ backgroundColor: '#EFF6FF', border: '1px solid #BFDBFE' }}>
+              <p className="text-[10px] font-bold uppercase tracking-widest mb-0.5" style={{ color: '#3B82F6' }}>
+                Calculated From Menu
+              </p>
+              <p className="text-xs mb-2" style={{ color: '#60A5FA' }}>Dishes + services total</p>
+              <p className="text-lg font-black" style={{ color: '#1E40AF' }}>{fmtPrice(menuTotal)}</p>
+            </div>
+          </div>
+
+          <div style={{ height: 1, backgroundColor: '#F1F5F9' }} />
+
+          {/* ── Editable fields ─────────────────────────────────────────────── */}
+          <div className="space-y-4">
+
+            {/* Final Selling Price */}
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wide mb-1.5" style={{ color: '#94A3B8' }}>
+                Final Selling Price (₹)
+              </label>
+              {isDraft ? (
+                <input
+                  type="number"
+                  value={Number(sellingPrice).toFixed(2)}
+                  onChange={e => setSellingPrice(parseFloat(e.target.value) || 0)}
+                  step="0.01"
+                  className="w-full px-3 py-2.5 rounded-lg text-sm outline-none font-semibold"
+                  style={{ border: '1.5px solid #E2E8F0', color: '#0F172A' }}
+                />
+              ) : (
+                <p className="text-base font-bold" style={{ color: '#0F172A' }}>{fmtPrice(selling)}</p>
+              )}
+            </div>
+
+            {/* Advance Amount */}
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wide mb-1.5" style={{ color: '#94A3B8' }}>
+                Advance Amount (₹)
+              </label>
+              {isDraft ? (
+                <input
+                  type="number"
+                  value={advanceAmount}
+                  onChange={e => setAdvanceAmount(e.target.value)}
+                  step="0.01"
+                  placeholder="0.00"
+                  className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
+                  style={{ border: '1.5px solid #E2E8F0', color: '#0F172A' }}
+                />
+              ) : (
+                <p className="text-base font-semibold" style={{ color: '#0F172A' }}>
+                  {advanceAmount
+                    ? fmtPrice(parseFloat(Number(advanceAmount).toFixed(2)))
+                    : <span style={{ color: '#94A3B8' }}>—</span>}
+                </p>
+              )}
+            </div>
+
+            {/* Payment Terms */}
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wide mb-1.5" style={{ color: '#94A3B8' }}>
+                Payment Terms
+              </label>
+              {isDraft ? (
+                <textarea
+                  value={paymentTerms}
+                  onChange={e => setPaymentTerms(e.target.value)}
+                  rows={3}
+                  placeholder="e.g. 50% advance, balance on event day…"
+                  className="w-full px-3 py-2.5 rounded-lg text-sm outline-none resize-none"
+                  style={{ border: '1.5px solid #E2E8F0', color: '#0F172A' }}
+                />
+              ) : (
+                <p className="text-sm leading-relaxed" style={{ color: '#334155' }}>
+                  {paymentTerms || <span style={{ color: '#94A3B8', fontStyle: 'italic' }}>No payment terms specified.</span>}
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* ── Summary cards ────────────────────────────────────────────────── */}
+          <div className="grid grid-cols-3 gap-2">
+            {/* SELLING */}
+            <div className="rounded-xl p-3 text-center" style={{ backgroundColor: '#F0FDF4', border: '1px solid #BBF7D0' }}>
+              <p className="text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: '#16A34A' }}>Selling</p>
+              <p className="text-sm font-black" style={{ color: '#15803D' }}>
+                ₹{selling.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+              </p>
+            </div>
+            {/* COST */}
+            <div className="rounded-xl p-3 text-center" style={{ backgroundColor: '#FEF2F2', border: '1px solid #FECACA' }}>
+              <p className="text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: '#DC2626' }}>Cost</p>
+              <p className="text-sm font-black" style={{ color: '#B91C1C' }}>
+                ₹{internalCost.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+              </p>
+            </div>
+            {/* MARGIN */}
+            <div className="rounded-xl p-3 text-center" style={{ backgroundColor: '#FEFCE8', border: '1px solid #FDE68A' }}>
+              <p className="text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: '#CA8A04' }}>Margin</p>
+              <p className="text-sm font-black" style={{ color: marginNeg ? '#DC2626' : '#A16207' }}>
+                {marginPct !== null ? `${marginPct}%` : '—'}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Footer ───────────────────────────────────────────────────────── */}
+        <div className="px-6 pt-3 pb-5 shrink-0 space-y-2" style={{ borderTop: '1px solid #F1F5F9' }}>
+          {/* Finalise button — only visible when DRAFT */}
+          {isDraft && (
+            <button
+              onClick={handleFinalise}
+              disabled={finalising}
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-bold text-white transition-opacity"
+              style={{ background: 'linear-gradient(135deg, #16A34A, #15803D)', opacity: finalising ? 0.7 : 1 }}
             >
-              {STATUSES.filter(s => s !== 'All').map(s => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Subtotal */}
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wide mb-1.5" style={{ color: '#94A3B8' }}>Subtotal (₹)</label>
-            <input
-              type="number"
-              value={subtotal}
-              onChange={e => setSubtotal(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg text-sm outline-none"
-              style={{ border: '1.5px solid #E2E8F0', color: '#0F172A' }}
-              placeholder="0"
-            />
-          </div>
-
-          {/* Service Charge */}
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wide mb-1.5" style={{ color: '#94A3B8' }}>Service Charge (₹)</label>
-            <input
-              type="number"
-              value={svcCharge}
-              onChange={e => setSvcCharge(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg text-sm outline-none"
-              style={{ border: '1.5px solid #E2E8F0', color: '#0F172A' }}
-              placeholder="0"
-            />
-          </div>
-
-          {/* Total (read-only) */}
-          <div className="flex items-center justify-between px-3 py-2 rounded-lg" style={{ background: '#F8FAFC', border: '1px solid #E2E8F0' }}>
-            <span className="text-sm font-medium" style={{ color: '#64748B' }}>Total Amount</span>
-            <span className="text-sm font-bold" style={{ color: '#0F172A' }}>₹{totalAmount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
-          </div>
-
-          {/* Notes */}
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wide mb-1.5" style={{ color: '#94A3B8' }}>Notes</label>
-            <textarea
-              value={notes}
-              onChange={e => setNotes(e.target.value)}
-              rows={3}
-              className="w-full px-3 py-2 rounded-lg text-sm outline-none resize-none"
-              style={{ border: '1.5px solid #E2E8F0', color: '#0F172A' }}
-              placeholder="Optional notes..."
-            />
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="flex gap-3 px-6 pb-5">
+              {finalising
+                ? <Loader2 size={14} className="animate-spin" />
+                : <span>✓</span>}
+              Finalise &amp; Send Quotation (Rev. {quotation.version})
+            </button>
+          )}
           <button
             onClick={onClose}
-            className="flex-1 px-4 py-2 rounded-lg text-sm font-medium"
+            className="w-full px-4 py-2.5 rounded-xl text-sm font-medium"
             style={{ border: '1.5px solid #E2E8F0', color: '#64748B' }}
           >
-            Cancel
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white"
-            style={{ background: '#16a34a', opacity: saving ? 0.7 : 1 }}
-          >
-            {saving && <Loader2 size={14} className="animate-spin" />}
-            Save Changes
+            {isFinalised ? 'Close' : 'Cancel'}
           </button>
         </div>
       </div>
@@ -348,7 +433,7 @@ export default function QuotationsPage() {
   const [page, setPage]             = useState(1);
   const [pageSize, setPageSize]     = useState(10);
 
-  const [editQuotation, setEditQuotation]   = useState<Quotation | null>(null);
+  const [pricingQuotation, setPricingQuotation] = useState<Quotation | null>(null);
   const [showNewModal, setShowNewModal]     = useState(false);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -565,8 +650,8 @@ export default function QuotationsPage() {
                         <Mail size={15} style={{ color: '#64748B' }} />
                       </button>
                       <button
-                        onClick={() => setEditQuotation(q)}
-                        title="Edit Quotation"
+                        onClick={() => setPricingQuotation(q)}
+                        title="Pricing"
                         className="p-1.5 rounded-lg transition-colors"
                         onMouseEnter={e => { e.currentTarget.style.background = '#F1F5F9'; }}
                         onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
@@ -662,10 +747,10 @@ export default function QuotationsPage() {
           onCreated={invalidate}
         />
       )}
-      {editQuotation && (
-        <EditModal
-          quotation={editQuotation}
-          onClose={() => setEditQuotation(null)}
+      {pricingQuotation && (
+        <PricingPanel
+          quotation={pricingQuotation}
+          onClose={() => setPricingQuotation(null)}
           onSaved={invalidate}
         />
       )}

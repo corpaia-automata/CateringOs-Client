@@ -54,14 +54,24 @@ interface Quotation {
   event: string;
 }
 
+interface InquiryQuotation {
+  id: string;
+  version_number: number;
+  status: string;
+  menu_total: string | number | null;
+  internal_cost: string | number | null;
+  quoted_price: string | number | null;
+  inquiry: string;
+  created_at: string;
+}
+
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
 const STATUS_CONFIG: Record<string, { bg: string; color: string; dot: string; label: string; step: number }> = {
   NEW:       { bg: '#EFF6FF', color: '#3B82F6', dot: '#3B82F6', label: 'New',       step: 0 },
   QUALIFIED: { bg: '#F5F3FF', color: '#7C3AED', dot: '#7C3AED', label: 'Qualified', step: 1 },
   FOLLOW_UP: { bg: '#FFF7ED', color: '#F97316', dot: '#F97316', label: 'Follow Up', step: 2 },
-  CONVERTED: { bg: '#ECFDF5', color: '#0D9488', dot: '#0D9488', label: 'Converted', step: 3 },
-  LOST:      { bg: '#FEF2F2', color: '#DC2626', dot: '#DC2626', label: 'Lost',       step: -1 },
+  REJECTED:  { bg: '#FEF2F2', color: '#DC2626', dot: '#DC2626', label: 'Rejected',  step: -1 },
 };
 
 const QUOTATION_STATUS_STYLE: Record<string, { bg: string; color: string }> = {
@@ -72,11 +82,10 @@ const QUOTATION_STATUS_STYLE: Record<string, { bg: string; color: string }> = {
 };
 
 const VALID_TRANSITIONS: Record<string, string[]> = {
-  NEW:       ['QUALIFIED', 'FOLLOW_UP', 'LOST'],
-  QUALIFIED: ['FOLLOW_UP', 'CONVERTED', 'LOST'],
-  FOLLOW_UP: ['QUALIFIED', 'CONVERTED', 'LOST'],
-  CONVERTED: [],
-  LOST:      ['NEW'],
+  NEW:       ['QUALIFIED', 'FOLLOW_UP', 'REJECTED'],
+  QUALIFIED: ['FOLLOW_UP', 'REJECTED'],
+  FOLLOW_UP: ['QUALIFIED', 'REJECTED'],
+  REJECTED:  ['NEW'],
 };
 
 const SOURCE_CHANNELS: Record<string, string> = {
@@ -91,7 +100,7 @@ const SOURCE_CHANNEL_OPTIONS = [
   { label: 'Walk In',    value: 'WALK_IN' },
 ];
 
-const PIPELINE_STEPS = ['NEW', 'QUALIFIED', 'FOLLOW_UP', 'CONVERTED'];
+const PIPELINE_STEPS = ['NEW', 'QUALIFIED', 'FOLLOW_UP'];
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -107,7 +116,7 @@ function fmtDateTime(d?: string) {
     ' • ' + dt.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase();
 }
 
-function fmtINR(v?: string | number) {
+function fmtINR(v?: string | number | null) {
   if (v == null || v === '') return '—';
   const n = typeof v === 'string' ? parseFloat(v) : v;
   if (isNaN(n)) return '—';
@@ -156,7 +165,7 @@ function buildTimeline(lead: LeadDetail): ActivityItem[] {
     date: createdDate.toISOString(),
     by: 'Staff',
   });
-  if (lead.status === 'CONVERTED' && lead.converted_event) {
+  if (lead.converted_event) {
     items.push({
       id: 'converted',
       type: 'converted',
@@ -405,8 +414,8 @@ function EditLeadDrawer({ lead, open, onClose, onSaved }: {
               <select className={inp} style={ist} value={form.status} onChange={e => set('status', e.target.value)}
                 onFocus={e => (e.currentTarget.style.borderColor = '#D95F0E')}
                 onBlur={e => (e.currentTarget.style.borderColor = '#E2E8F0')}
-                disabled={lead.status === 'CONVERTED'}>
-                {['NEW', 'QUALIFIED', 'FOLLOW_UP', 'CONVERTED', 'LOST'].map(s =>
+                >
+                {['NEW', 'QUALIFIED', 'FOLLOW_UP', 'REJECTED'].map(s =>
                   <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
               </select>
             </div>
@@ -480,6 +489,12 @@ export default function LeadDetailPage() {
   const [creatingEstimate, setCreatingEstimate] = useState(false);
   const [rowMenuOpen, setRowMenuOpen] = useState<string | null>(null);
   const rowMenuRef = useRef<HTMLDivElement>(null);
+  const [activeTab, setActiveTab] = useState<'overview' | 'pricing'>('overview');
+  const [noteText, setNoteText] = useState('');
+  const [submittingNote, setSubmittingNote] = useState(false);
+  const [converting, setConverting] = useState(false);
+  const [revisingQuotation, setRevisingQuotation] = useState(false);
+  const [markingLost, setMarkingLost] = useState(false);
 
   useEffect(() => {
     function handler(e: MouseEvent) {
@@ -503,6 +518,12 @@ export default function LeadDetailPage() {
     enabled: !!convertedEventId,
   });
 
+  const { data: inquiryQuotationsData, refetch: refetchInquiryQuotations } = useQuery<{ results?: InquiryQuotation[] } | InquiryQuotation[]>({
+    queryKey: ['inquiry-quotations', id],
+    queryFn: () => api.get(`/quotations/?inquiry=${id}`),
+    enabled: !!id,
+  });
+
   const allQuotations: Quotation[] = Array.isArray(quotationsData)
     ? quotationsData
     : (quotationsData?.results ?? []);
@@ -510,6 +531,11 @@ export default function LeadDetailPage() {
   const sortedQuotations = [...allQuotations].sort((a, b) => b.version - a.version);
   const displayedQuotations = sortedQuotations.slice(0, 3);
   const latestQuotation = sortedQuotations[0];
+
+  const inquiryQuotations: InquiryQuotation[] = Array.isArray(inquiryQuotationsData)
+    ? inquiryQuotationsData
+    : (inquiryQuotationsData?.results ?? []);
+  const latestInquiryQuotation = [...inquiryQuotations].sort((a, b) => b.version_number - a.version_number)[0] ?? null;
 
   async function handleStatusChange(newStatus: string) {
     if (!lead) return;
@@ -556,6 +582,59 @@ export default function LeadDetailPage() {
     }
   }
 
+  async function handleMarkLost() {
+    if (!lead) return;
+    setMarkingLost(true);
+    try {
+      await api.patch(`/inquiries/${lead.id}/`, { status: 'REJECTED' });
+      toast.success('Marked as lost');
+      qc.invalidateQueries({ queryKey: ['lead', id] });
+    } catch {
+      toast.error('Failed to update status');
+    } finally { setMarkingLost(false); }
+  }
+
+  async function handleConvert() {
+    if (!lead) return;
+    setConverting(true);
+    try {
+      const result = await api.post(`/inquiries/${lead.id}/convert/`, {}) as { event_id?: string; id?: string };
+      toast.success('Converted to event!');
+      const eventId = result.event_id ?? result.id;
+      if (eventId) router.push(`/events/${eventId}`);
+    } catch (err: unknown) {
+      const e = err as { data?: { detail?: string } };
+      toast.error(e?.data?.detail ?? 'Failed to convert');
+    } finally { setConverting(false); }
+  }
+
+  async function handleReviseQuotation() {
+    if (!lead) return;
+    setRevisingQuotation(true);
+    try {
+      await api.post('/quotations/', { inquiry_id: lead.id, status: 'DRAFT' });
+      toast.success('New revision created');
+      await refetchInquiryQuotations();
+      setActiveTab('overview');
+    } catch (err: unknown) {
+      const e = err as { data?: { detail?: string } };
+      toast.error(e?.data?.detail ?? 'Failed to create revision');
+    } finally { setRevisingQuotation(false); }
+  }
+
+  async function handleSendNote() {
+    if (!lead || !noteText.trim()) return;
+    setSubmittingNote(true);
+    try {
+      await api.post(`/inquiries/${lead.id}/notes/`, { text: noteText.trim() });
+      toast.success('Note added');
+      setNoteText('');
+      qc.invalidateQueries({ queryKey: ['lead', id] });
+    } catch {
+      toast.error('Failed to add note');
+    } finally { setSubmittingNote(false); }
+  }
+
   if (isLoading) return <LeadDetailSkeleton />;
   if (isError || !lead) {
     return (
@@ -583,7 +662,7 @@ export default function LeadDetailPage() {
   const showBudgetAlert = budgetPerPlate !== null && latestPerPlate !== null && latestPerPlate !== budgetPerPlate;
   const eventGuests = lead.converted_event?.guest_count ?? lead.guest_count;
   const cfg = STATUS_CONFIG[lead.status] ?? STATUS_CONFIG['NEW'];
-  const currentPipelineStep = lead.status === 'LOST' ? -1 : (cfg.step ?? 0);
+  const currentPipelineStep = cfg.step ?? 0;
 
   return (
     <>
@@ -646,7 +725,7 @@ export default function LeadDetailPage() {
                     {initials(lead.customer_name)}
                   </div>
                   <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-2 border-white"
-                    style={{ backgroundColor: lead.status === 'CONVERTED' ? '#0D9488' : lead.status === 'LOST' ? '#DC2626' : '#F97316' }} />
+                    style={{ backgroundColor: lead.status === 'REJECTED' ? '#DC2626' : '#F97316' }} />
                 </div>
 
                 <div className="flex-1 min-w-0">
@@ -707,7 +786,7 @@ export default function LeadDetailPage() {
             </div>
 
             {/* Pipeline Progress */}
-            {lead.status !== 'LOST' && (
+            {lead.status !== 'REJECTED' && (
               <div className="flex items-center gap-0 pb-0 -mb-px overflow-x-auto">
                 {PIPELINE_STEPS.map((step, idx) => {
                   const sc = STATUS_CONFIG[step];
@@ -748,12 +827,12 @@ export default function LeadDetailPage() {
                 })}
               </div>
             )}
-            {lead.status === 'LOST' && (
+            {lead.status === 'REJECTED' && (
               <div className="flex items-center gap-2 px-4 py-3 mb-0"
                 style={{ backgroundColor: 'rgba(220,38,38,0.1)', borderTop: '1px solid rgba(220,38,38,0.2)' }}>
                 <AlertCircle size={14} style={{ color: '#F87171' }} />
                 <span className="text-xs font-semibold" style={{ color: '#F87171' }}>
-                  This lead has been marked as Lost
+                  This lead has been marked as Rejected
                 </span>
               </div>
             )}
@@ -789,6 +868,67 @@ export default function LeadDetailPage() {
 
           {/* ── Left Column ── */}
           <div className="flex flex-col gap-5">
+
+            {/* Tab Navigation */}
+            {latestInquiryQuotation && (
+              <div className="flex gap-1 bg-white rounded-2xl p-1 shadow-sm" style={{ border: '1px solid #E2E8F0' }}>
+                {([
+                  { key: 'overview', label: 'Overview' },
+                  { key: 'pricing', label: 'Pricing & Quote' },
+                ] as const).map(tab => (
+                  <button key={tab.key}
+                    onClick={() => setActiveTab(tab.key)}
+                    className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all"
+                    style={{
+                      backgroundColor: activeTab === tab.key ? '#1C3355' : 'transparent',
+                      color: activeTab === tab.key ? '#fff' : '#64748B',
+                    }}>
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Pricing Tab Content */}
+            {activeTab === 'pricing' && latestInquiryQuotation && (
+              <div className="bg-white rounded-2xl shadow-sm overflow-hidden" style={{ border: '1px solid #E2E8F0' }}>
+                <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: '1px solid #F1F5F9' }}>
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ backgroundColor: '#EFF6FF' }}>
+                      <IndianRupee size={15} style={{ color: '#3B82F6' }} />
+                    </div>
+                    <div>
+                      <h2 className="text-sm font-bold" style={{ color: '#0F172A' }}>Pricing & Quote</h2>
+                      <p className="text-xs" style={{ color: '#94A3B8' }}>Rev. {latestInquiryQuotation.version_number} · {latestInquiryQuotation.status}</p>
+                    </div>
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-px" style={{ backgroundColor: '#F1F5F9' }}>
+                  {[
+                    { label: 'Menu Total', value: fmtINR(latestInquiryQuotation.menu_total), color: '#475569' },
+                    { label: 'Internal Cost', value: fmtINR(latestInquiryQuotation.internal_cost), color: '#475569' },
+                    { label: 'Quoted Price', value: fmtINR(latestInquiryQuotation.quoted_price), color: '#3B82F6' },
+                  ].map(({ label, value, color }) => (
+                    <div key={label} className="bg-white px-5 py-4 text-center">
+                      <p className="text-xs font-medium mb-1.5" style={{ color: '#94A3B8' }}>{label}</p>
+                      <p className="text-base font-bold" style={{ color }}>{value}</p>
+                    </div>
+                  ))}
+                </div>
+                {lead.converted_event && (
+                  <div className="px-6 py-4 flex justify-end" style={{ borderTop: '1px solid #F1F5F9' }}>
+                    <button onClick={() => router.push(`/events/${convertedEventId}`)}
+                      className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-xl"
+                      style={{ color: '#3B82F6', border: '1px solid #3B82F630' }}>
+                      Open full editor <ChevronRight size={12} />
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Overview Tab — wrap existing cards */}
+            {(activeTab === 'overview' || !latestInquiryQuotation) && (<>
 
             {/* Event Details Card */}
             <div className="bg-white rounded-2xl shadow-sm overflow-hidden" style={{ border: '1px solid #E2E8F0' }}>
@@ -993,58 +1133,151 @@ export default function LeadDetailPage() {
                 </div>
               </div>
             )}
+            </>)}
+
           </div>
 
           {/* ── Right Sidebar ── */}
           <div className="flex flex-col gap-5">
 
-            {/* Quick Actions */}
+            {/* Status-Driven Actions */}
             <div className="bg-white rounded-2xl shadow-sm overflow-hidden" style={{ border: '1px solid #E2E8F0' }}>
               <div className="flex items-center gap-2.5 px-5 py-4" style={{ borderBottom: '1px solid #F1F5F9' }}>
                 <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #D95F0E, #F97316)' }}>
                   <Zap size={14} className="text-white" />
                 </div>
-                <h2 className="text-sm font-bold" style={{ color: '#0F172A' }}>Quick Actions</h2>
+                <h2 className="text-sm font-bold" style={{ color: '#0F172A' }}>Actions</h2>
               </div>
-              <div className="p-3 flex flex-col gap-1.5">
-                {VALID_TRANSITIONS[lead.status]?.map(ns => {
-                  const nc = STATUS_CONFIG[ns];
-                  return (
-                    <button key={ns}
-                      onClick={() => handleStatusChange(ns)}
-                      className="w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-semibold transition-all hover:shadow-sm"
-                      style={{ backgroundColor: `${nc.color}10`, color: nc.color, border: `1px solid ${nc.color}20` }}>
-                      <span className="flex items-center gap-2.5">
-                        <span className="w-2 h-2 rounded-full" style={{ backgroundColor: nc.color }} />
-                        Move to {nc.label}
-                      </span>
-                      <ChevronRight size={14} style={{ opacity: 0.5 }} />
+              <div className="p-4 flex flex-col gap-2">
+                {latestInquiryQuotation?.status === 'DRAFT' ? (
+                  <>
+                    <div className="flex items-start gap-2.5 p-3 rounded-xl mb-1" style={{ backgroundColor: '#FFFBEB', border: '1px solid #FDE68A' }}>
+                      <span className="text-base leading-none mt-0.5">⏰</span>
+                      <div>
+                        <p className="text-xs font-bold" style={{ color: '#92400E' }}>Planning · Rev. {latestInquiryQuotation.version_number}</p>
+                        <p className="text-xs mt-0.5" style={{ color: '#B45309' }}>Edit menu, costing & pricing freely</p>
+                      </div>
+                    </div>
+                    <button onClick={() => setActiveTab('pricing')}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-bold text-white transition-all"
+                      style={{ backgroundColor: '#3B82F6' }}>
+                      $ Go to Pricing & Quote
                     </button>
-                  );
-                })}
-                <button onClick={() => setEditOpen(true)}
-                  className="w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-semibold transition-all hover:bg-slate-50"
-                  style={{ color: '#475569', border: '1px solid #E2E8F0' }}>
-                  <span className="flex items-center gap-2.5">
-                    <Pencil size={14} />
-                    Edit Lead Details
-                  </span>
-                  <ChevronRight size={14} style={{ opacity: 0.4 }} />
-                </button>
-                <button
-                  onClick={() => lead.converted_event ? setNewEstimateOpen(true) : toast.error('Convert lead to event first')}
-                  className="w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-semibold transition-all"
-                  style={{
-                    color: lead.converted_event ? '#0D9488' : '#94A3B8',
-                    border: `1px solid ${lead.converted_event ? '#0D948820' : '#E2E8F0'}`,
-                    backgroundColor: lead.converted_event ? '#ECFDF510' : 'transparent',
-                    opacity: lead.converted_event ? 1 : 0.6,
-                  }}>
-                  <span className="flex items-center gap-2.5">
-                    <Plus size={14} />
-                    Create Pre-Estimate
-                  </span>
-                  <ChevronRight size={14} style={{ opacity: 0.4 }} />
+                    <button onClick={handleMarkLost} disabled={markingLost}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold transition-all"
+                      style={{ color: '#DC2626', border: '1.5px solid #DC2626', backgroundColor: 'transparent', opacity: markingLost ? 0.7 : 1 }}>
+                      {markingLost && <Loader2 size={14} className="animate-spin" />}
+                      ✕ Mark as Lost
+                    </button>
+                  </>
+                ) : latestInquiryQuotation?.status === 'SENT' ? (
+                  <>
+                    <div className="flex items-start gap-2.5 p-3 rounded-xl mb-1" style={{ backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0' }}>
+                      <span className="text-base leading-none mt-0.5">🔒</span>
+                      <div>
+                        <p className="text-xs font-bold" style={{ color: '#475569' }}>Quotation Sent</p>
+                        <p className="text-xs mt-0.5" style={{ color: '#94A3B8' }}>Awaiting client decision</p>
+                      </div>
+                    </div>
+                    <button onClick={handleConvert} disabled={converting}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-bold text-white transition-all"
+                      style={{ backgroundColor: '#16A34A', opacity: converting ? 0.7 : 1 }}>
+                      {converting && <Loader2 size={14} className="animate-spin" />}
+                      ✓ Confirm & Convert to Event
+                    </button>
+                    <button onClick={handleReviseQuotation} disabled={revisingQuotation}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold transition-all"
+                      style={{ color: '#7C3AED', border: '1.5px solid #7C3AED', backgroundColor: 'transparent', opacity: revisingQuotation ? 0.7 : 1 }}>
+                      {revisingQuotation && <Loader2 size={14} className="animate-spin" />}
+                      ↺ Revise Quotation — Rev. {(latestInquiryQuotation.version_number ?? 0) + 1}
+                    </button>
+                    <button onClick={handleMarkLost} disabled={markingLost}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold transition-all"
+                      style={{ color: '#DC2626', border: '1.5px solid #DC2626', backgroundColor: 'transparent', opacity: markingLost ? 0.7 : 1 }}>
+                      {markingLost && <Loader2 size={14} className="animate-spin" />}
+                      ✕ Mark as Lost
+                    </button>
+                  </>
+                ) : (
+                  /* No inquiry quotation: show single pipeline transition + edit */
+                  <>
+                    {VALID_TRANSITIONS[lead.status]?.slice(0, 1).map(ns => {
+                      const nc = STATUS_CONFIG[ns];
+                      return (
+                        <button key={ns}
+                          onClick={() => handleStatusChange(ns)}
+                          className="w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-semibold transition-all hover:shadow-sm"
+                          style={{ backgroundColor: `${nc.color}10`, color: nc.color, border: `1px solid ${nc.color}20` }}>
+                          <span className="flex items-center gap-2.5">
+                            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: nc.color }} />
+                            Move to {nc.label}
+                          </span>
+                          <ChevronRight size={14} style={{ opacity: 0.5 }} />
+                        </button>
+                      );
+                    })}
+                    <button onClick={() => setEditOpen(true)}
+                      className="w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-semibold transition-all hover:bg-slate-50"
+                      style={{ color: '#475569', border: '1px solid #E2E8F0' }}>
+                      <span className="flex items-center gap-2.5">
+                        <Pencil size={14} />
+                        Edit Lead Details
+                      </span>
+                      <ChevronRight size={14} style={{ opacity: 0.4 }} />
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Summary Card */}
+            {latestInquiryQuotation && (
+              <div className="bg-white rounded-2xl shadow-sm overflow-hidden" style={{ border: '1px solid #E2E8F0' }}>
+                <div className="flex items-center gap-2.5 px-5 py-4" style={{ borderBottom: '1px solid #F1F5F9' }}>
+                  <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ backgroundColor: '#EFF6FF' }}>
+                    <IndianRupee size={14} style={{ color: '#3B82F6' }} />
+                  </div>
+                  <h2 className="text-sm font-bold" style={{ color: '#0F172A' }}>Summary</h2>
+                </div>
+                <div className="px-5 py-4 flex flex-col gap-3">
+                  {[
+                    { label: 'Menu Total', value: fmtINR(latestInquiryQuotation.menu_total), highlight: false },
+                    { label: 'Internal Cost', value: fmtINR(latestInquiryQuotation.internal_cost), highlight: false },
+                    { label: 'Quoted Price', value: fmtINR(latestInquiryQuotation.quoted_price), highlight: true },
+                  ].map(({ label, value, highlight }) => (
+                    <div key={label} className="flex items-center justify-between py-1" style={{ borderBottom: '1px solid #F8FAFC' }}>
+                      <span className="text-xs" style={{ color: '#94A3B8' }}>{label}</span>
+                      <span className="text-sm font-bold" style={{ color: highlight ? '#3B82F6' : '#0F172A' }}>{value}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Add Note Card */}
+            <div className="bg-white rounded-2xl shadow-sm overflow-hidden" style={{ border: '1px solid #E2E8F0' }}>
+              <div className="flex items-center gap-2.5 px-5 py-4" style={{ borderBottom: '1px solid #F1F5F9' }}>
+                <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ backgroundColor: '#FFF7ED' }}>
+                  <MessageSquare size={14} style={{ color: '#F97316' }} />
+                </div>
+                <h2 className="text-sm font-bold" style={{ color: '#0F172A' }}>Add Note</h2>
+              </div>
+              <div className="p-4 flex flex-col gap-3">
+                <textarea
+                  value={noteText}
+                  onChange={e => setNoteText(e.target.value)}
+                  placeholder="Add a note or update..."
+                  rows={3}
+                  className="w-full px-3 py-2.5 rounded-xl text-sm outline-none resize-none transition-colors"
+                  style={{ border: '1.5px solid #E2E8F0', backgroundColor: '#F8FAFC', color: '#0F172A' }}
+                  onFocus={e => (e.currentTarget.style.borderColor = '#D95F0E')}
+                  onBlur={e => (e.currentTarget.style.borderColor = '#E2E8F0')}
+                />
+                <button onClick={handleSendNote} disabled={submittingNote || !noteText.trim()}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold text-white transition-all"
+                  style={{ backgroundColor: '#D95F0E', opacity: submittingNote || !noteText.trim() ? 0.5 : 1 }}>
+                  {submittingNote && <Loader2 size={14} className="animate-spin" />}
+                  Send Note
                 </button>
               </div>
             </div>

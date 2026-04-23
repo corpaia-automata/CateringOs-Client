@@ -3,7 +3,7 @@ import { authStorage } from './auth';
 const BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 // Paths that must NOT be prefixed with /app/{slug}
-const GLOBAL_PATHS = ['/auth/refresh/', '/auth/find-tenant', '/onboard'];
+const GLOBAL_PATHS = ['/auth/refresh/', '/auth/find-tenant', '/onboard', '/categories/'];
 
 function buildPath(path: string): string {
   // Already slug-rooted or is a global path — leave as-is
@@ -36,6 +36,7 @@ async function apiFetch(path: string, options: RequestInit = {}): Promise<any> {
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
+    console.error(`[apiFetch] ${res.status} ${options.method ?? 'GET'} ${BASE}/api${fullPath}`, body);
     const errData = (body as Record<string, unknown>)?.errors ?? body;
     throw { status: res.status, data: errData };
   }
@@ -64,6 +65,21 @@ export const api = {
   patch:  (path: string, body: object)    => apiFetch(path, { method: 'PATCH',  body: JSON.stringify(body) }),
   put:    (path: string, body: object)    => apiFetch(path, { method: 'PUT',    body: JSON.stringify(body) }),
   delete: (path: string)                  => apiFetch(path, { method: 'DELETE' }),
+  // Multipart upload — omits Content-Type so the browser sets it with the boundary
+  upload: async (path: string, body: FormData) => {
+    const token = authStorage.getAccess();
+    const fullPath = buildPath(path);
+    const res = await fetch(`${BASE}/api${fullPath}`, {
+      method: 'POST',
+      body,
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw { status: res.status, data: errBody };
+    }
+    return res.status === 204 ? null : res.json();
+  },
   download: async (path: string, filename: string) => {
     const token = authStorage.getAccess();
     const fullPath = buildPath(path);

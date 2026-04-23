@@ -4,10 +4,10 @@ import { useState, useEffect, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, useRouter } from 'next/navigation';
 import {
-  ArrowLeft, Pencil, MoreHorizontal, Phone, Users, IndianRupee,
+  ArrowLeft, Pencil, IndianRupee,
   Plus, ShoppingCart, FileText, CheckCircle, XCircle, Eye, EyeOff,
   Loader2, Download, Clock, X, Search, ChevronDown, AlertTriangle,
-  ChefHat, Calculator, Trash2, Check, Mail, CreditCard,
+  ChefHat, Calculator, Trash2, Check, CalendarDays, MapPin,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '@/lib/api';
@@ -877,32 +877,21 @@ function ActivityTab({ eventId }: { eventId: string }) {
 
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 
-type Tab = 'menu' | 'notes' | 'quotation' | 'activity';
+type Tab = 'overview' | 'menu' | 'costing' | 'grocery' | 'payments' | 'status';
 
 export default function EventDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const qc = useQueryClient();
 
-  const [activeTab, setActiveTab] = useState<Tab>('menu');
+  const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [editOpen, setEditOpen] = useState(false);
-  const [moreOpen, setMoreOpen] = useState(false);
-  const [phoneRevealed, setPhoneRevealed] = useState(false);
   const [cancelConfirm, setCancelConfirm] = useState(false);
-  const moreRef = useRef<HTMLDivElement>(null);
 
   const { data: event, isLoading } = useQuery({
     queryKey: ['event', id],
     queryFn: () => api.get(`/events/${id}/`),
   });
-
-  useEffect(() => {
-    function handler(e: MouseEvent) {
-      if (moreRef.current && !moreRef.current.contains(e.target as Node)) setMoreOpen(false);
-    }
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
 
   async function handleCancel() {
     try {
@@ -989,30 +978,71 @@ export default function EventDetailPage() {
   }
 
   const e = event as EventDetail;
-  const statusStyle = STATUS_STYLE[e.status] ?? STATUS_STYLE.DRAFT;
-
   const TABS: { key: Tab; label: string }[] = [
+    { key: 'overview', label: 'Overview' },
     { key: 'menu', label: 'Menu' },
-    { key: 'notes', label: 'Notes' },
-    { key: 'quotation', label: 'Quotation' },
-    { key: 'activity', label: 'Activity' },
+    { key: 'costing', label: 'Costing' },
+    { key: 'grocery', label: 'Grocery' },
+    { key: 'payments', label: 'Payments' },
+    { key: 'status', label: 'Status' },
   ];
 
-  return (
-    <div className="flex flex-col gap-6 pb-8">
+  const totalAmount = Number(e.total_amount ?? 0);
+  const advanceAmount = Number(e.advance_amount ?? 0);
+  const paidAmount = advanceAmount;
+  const balanceAmount = Number(e.balance_amount ?? Math.max(0, totalAmount - paidAmount));
+  const internalCost = Number(e.food_cost ?? 0) + Number(e.labor_cost ?? 0) + Number(e.other_costs ?? 0);
+  const marginPct = totalAmount > 0 ? ((totalAmount - internalCost) / totalAmount) * 100 : 0;
+  const eventTitle = e.event_name || `${e.client_name || 'Client'}'s Event`;
 
-      {/* ── Breadcrumb ── */}
-      <div className="flex items-center gap-2 text-sm text-gray-500">
-        <button
-          onClick={() => router.back()}
-          className="flex items-center gap-1.5 hover:text-gray-700 transition-colors"
-        >
-          <ArrowLeft size={14} /> Events
-        </button>
-        <span className="text-gray-300">/</span>
-        <span className="text-gray-900 font-medium truncate">
-          {e.event_name || `${e.client_name} — ${e.event_type}`}
-        </span>
+  return (
+    <div className="flex flex-col gap-5 pb-8">
+      <button
+        onClick={() => router.push('/events')}
+        className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 transition-colors w-fit"
+      >
+        <ArrowLeft size={14} /> Back to Events
+      </button>
+
+      <div className="rounded-2xl border border-slate-200 bg-white p-5">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-[11px] px-2 py-0.5 rounded bg-violet-50 text-violet-600 font-semibold">Main Event</span>
+              <span className="text-[11px] px-2 py-0.5 rounded bg-slate-100 text-slate-500 font-semibold">Upcoming</span>
+            </div>
+            <h1 className="text-3xl font-semibold text-slate-900 leading-tight">{eventTitle}</h1>
+            <p className="text-sm text-slate-500 mt-1">Created on {fmtDate(e.created_at)}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setEditOpen(true)}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+            >
+              <Pencil size={14} /> Edit
+            </button>
+            <button className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800">
+              <FileText size={14} /> Invoice
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-5 border-b border-slate-200">
+          <div className="flex items-center gap-6 overflow-x-auto">
+            {TABS.map(tab => (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key)}
+                className={`relative pb-3 text-sm font-medium whitespace-nowrap ${activeTab === tab.key ? 'text-indigo-600' : 'text-slate-500 hover:text-slate-700'}`}
+              >
+                {tab.label}
+                {activeTab === tab.key && (
+                  <span className="absolute left-0 right-0 -bottom-px h-0.5 bg-indigo-600 rounded-full" />
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* ── Command Center: 2-column grid ── */}
@@ -1021,143 +1051,108 @@ export default function EventDetailPage() {
         {/* ════ LEFT COLUMN ════ */}
         <div className="flex flex-col gap-5 min-w-0">
 
-          {/* [1+2] Event Header + Financial Summary — combined card */}
-          <div className="rounded-xl border border-gray-200 shadow-sm p-6 bg-white">
+          <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
+            <div className="p-5">
+              {activeTab === 'overview' && (
+                <div className="grid gap-5 lg:grid-cols-[1fr_320px] items-start">
+                  <div className="flex flex-col gap-5">
+                    <div className="rounded-xl border border-slate-200">
+                      <div className="px-4 py-3 border-b border-slate-200 font-semibold text-slate-800">Event Details</div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 p-4">
+                        <div className="flex items-start gap-2">
+                          <CalendarDays size={16} className="text-violet-500 mt-0.5" />
+                          <div><p className="text-xs text-slate-500">Date</p><p className="font-medium text-slate-800">{fmtDate(e.event_date)}</p></div>
+                        </div>
+                        <div className="flex items-start gap-2">
+                          <Clock size={16} className="text-violet-500 mt-0.5" />
+                          <div><p className="text-xs text-slate-500">Time</p><p className="font-medium text-slate-800">{fmtTime(e.event_time) || '—'}</p></div>
+                        </div>
+                        <div className="flex items-start gap-2">
+                          <CheckCircle size={16} className="text-violet-500 mt-0.5" />
+                          <div><p className="text-xs text-slate-500">Guests</p><p className="font-medium text-slate-800">{e.guest_count || 0} people</p></div>
+                        </div>
+                        <div className="flex items-start gap-2">
+                          <MapPin size={16} className="text-violet-500 mt-0.5" />
+                          <div><p className="text-xs text-slate-500">Venue</p><p className="font-medium text-slate-800">{e.venue || '—'}</p></div>
+                        </div>
+                      </div>
+                    </div>
 
-            {/* Row 1: Title + Status badge */}
-            <div className="flex items-start justify-between gap-4">
-              <h1 className="text-2xl font-bold text-gray-900 leading-snug">
-                {e.event_name || `${e.client_name} — ${e.event_type}`}
-              </h1>
-              <span
-                className="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold shrink-0 tracking-wide"
-                style={{ backgroundColor: statusStyle.bg, color: statusStyle.color }}
-              >
-                {e.status.replace(/_/g, ' ')}
-              </span>
-            </div>
+                    <div className="rounded-xl border border-slate-200">
+                      <div className="px-4 py-3 border-b border-slate-200 font-semibold text-slate-800">Client Information</div>
+                      <div className="p-4">
+                        <p className="font-semibold text-slate-800">{e.client_name || 'Client'}</p>
+                        <p className="text-sm text-slate-500 mt-0.5">{e.contact_number || '—'}</p>
+                      </div>
+                    </div>
 
-            {/* Row 2: Date · Venue · Guests */}
-            <p className="mt-1.5 text-sm text-gray-500">
-              {fmtDate(e.event_date)}
-              {e.event_time && <span> · {fmtTime(e.event_time)}</span>}
-              {e.venue && <span> · {e.venue}</span>}
-              {e.guest_count && <span> · {e.guest_count} guests</span>}
-            </p>
+                    <div className="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-slate-600">
+                      Converted from enquiry <span className="font-semibold text-indigo-700">{eventIdDisplay(e)}</span>
+                    </div>
+                  </div>
 
-            {/* Divider */}
-            <div className="my-4 h-px bg-gray-100" />
-
-            {/* Row 3: Financial figures */}
-            <div className="flex items-center gap-6 flex-wrap">
-              <div className="flex items-baseline gap-2">
-                <span className="text-xl font-bold text-gray-900">{fmtINR(e.total_amount)}</span>
-                <span className="text-sm text-gray-500">Total</span>
-              </div>
-              <div className="flex items-baseline gap-2">
-                <span className="text-xl font-bold text-gray-900">{fmtINR(e.advance_amount)}</span>
-                <span className="text-sm text-gray-500">Paid</span>
-              </div>
-              <div className="flex items-baseline gap-2">
-                <span className="text-xl font-bold text-red-500">{fmtINR(e.balance_amount)}</span>
-                <span className="text-sm text-red-400">Pending</span>
-              </div>
-              {e.contact_number && (
-                <div className="ml-auto">
-                  <button
-                    onClick={() => setPhoneRevealed(v => !v)}
-                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 text-xs transition-colors"
-                  >
-                    <Phone size={13} />
-                    <span className="font-mono">
-                      {phoneRevealed ? e.contact_number : maskPhone(e.contact_number)}
-                    </span>
-                    {phoneRevealed
-                      ? <EyeOff size={11} className="text-gray-400" />
-                      : <Eye size={11} className="text-gray-400" />}
-                  </button>
+                  <div className="flex flex-col gap-4">
+                    <div className="rounded-xl border border-slate-200">
+                      <div className="px-4 py-3 border-b border-slate-200 font-semibold text-slate-800">Payment Status</div>
+                      <div className="p-4 space-y-2">
+                        <div className="flex justify-between text-slate-600"><span>Total</span><span className="font-bold text-slate-900">{fmtINR(totalAmount)}</span></div>
+                        <div className="flex justify-between text-slate-600"><span>Advance</span><span>{fmtINR(advanceAmount)}</span></div>
+                        <div className="flex justify-between text-slate-600"><span>Paid</span><span className="text-emerald-600 font-semibold">{fmtINR(paidAmount)}</span></div>
+                        <div className="pt-2 mt-2 border-t border-slate-200 flex justify-between"><span className="font-semibold text-slate-800">Balance</span><span className="font-bold text-amber-600">{fmtINR(balanceAmount)}</span></div>
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-slate-200">
+                      <div className="px-4 py-3 border-b border-slate-200 font-semibold text-slate-800">Cost Summary</div>
+                      <div className="p-4 space-y-2">
+                        <div className="flex justify-between text-slate-600"><span>Internal Cost</span><span className="font-bold text-slate-900">{fmtINR(internalCost)}</span></div>
+                        <div className="flex justify-between text-slate-600"><span>Revenue</span><span>{fmtINR(totalAmount)}</span></div>
+                        <div className="pt-2 mt-2 border-t border-slate-200 flex justify-between"><span className="font-semibold text-slate-800">Margin</span><span className="font-bold text-emerald-600">{marginPct.toFixed(1)}%</span></div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               )}
-            </div>
 
-            {/* Row 4: Action buttons */}
-            <div className="flex items-center gap-2 mt-4 flex-wrap">
-              <button
-                onClick={handleMarkConfirmed}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold bg-green-600 text-white hover:bg-green-700 transition-colors"
-              >
-                <Check size={15} /> Mark Confirmed
-              </button>
-              <button className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold bg-indigo-600 text-white hover:bg-indigo-700 transition-colors">
-                <CreditCard size={15} /> Add Payment
-              </button>
-              <button className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border border-gray-200 text-gray-700 hover:bg-gray-50 transition-colors">
-                <Mail size={15} /> Send Reminder
-              </button>
-              <button
-                onClick={() => setEditOpen(true)}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border border-gray-200 text-gray-700 hover:bg-gray-50 transition-colors"
-              >
-                <Users size={15} /> Assign Staff
-              </button>
-              <div ref={moreRef} className="relative ml-auto">
-                <button
-                  onClick={() => setMoreOpen(v => !v)}
-                  className="flex items-center px-2.5 py-2 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 transition-colors"
-                >
-                  <MoreHorizontal size={16} />
-                </button>
-                {moreOpen && (
-                  <div className="absolute right-0 top-full mt-1 z-20 rounded-lg py-1 min-w-[160px] bg-white border border-gray-200 shadow-lg">
-                    <button
-                      onClick={() => { setEditOpen(true); setMoreOpen(false); }}
-                      className="flex items-center gap-2 w-full px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 transition-colors"
-                    >
-                      <Pencil size={13} /> Edit Event
-                    </button>
-                    <button
-                      onClick={() => { setMoreOpen(false); toast('Duplicate coming soon'); }}
-                      className="flex items-center gap-2 w-full px-3 py-2 text-xs text-gray-500 hover:bg-gray-50 transition-colors"
-                    >
-                      Duplicate Event
-                    </button>
-                    <button
-                      onClick={() => { setCancelConfirm(true); setMoreOpen(false); }}
-                      className="flex items-center gap-2 w-full px-3 py-2 text-xs text-red-600 hover:bg-red-50 transition-colors"
-                    >
-                      <XCircle size={13} /> Cancel Event
-                    </button>
+              {activeTab === 'menu' && <MenuTab eventId={id} />}
+              {activeTab === 'costing' && (
+                <div className="rounded-xl border border-slate-200 p-5">
+                  <p className="text-sm text-slate-600">Food cost: <span className="font-semibold text-slate-900">{fmtINR(e.food_cost)}</span></p>
+                  <p className="text-sm text-slate-600 mt-2">Labour cost: <span className="font-semibold text-slate-900">{fmtINR(e.labor_cost)}</span></p>
+                  <p className="text-sm text-slate-600 mt-2">Other costs: <span className="font-semibold text-slate-900">{fmtINR(e.other_costs)}</span></p>
+                </div>
+              )}
+              {activeTab === 'grocery' && (
+                <div className="rounded-xl border border-slate-200 p-5 flex items-center justify-between">
+                  <p className="text-sm text-slate-600">Generate grocery list from current menu.</p>
+                  <button onClick={handleGenerateGrocery} className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700">Generate</button>
+                </div>
+              )}
+              {activeTab === 'payments' && (
+                <div className="rounded-xl border border-slate-200 p-5">
+                  <p className="text-sm text-slate-600">Total: <span className="font-semibold text-slate-900">{fmtINR(totalAmount)}</span></p>
+                  <p className="text-sm text-slate-600 mt-2">Paid: <span className="font-semibold text-emerald-600">{fmtINR(paidAmount)}</span></p>
+                  <p className="text-sm text-slate-600 mt-2">Balance: <span className="font-semibold text-amber-600">{fmtINR(balanceAmount)}</span></p>
+                </div>
+              )}
+              {activeTab === 'status' && (
+                <div className="rounded-xl border border-slate-200 p-5 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm text-slate-500">Current status</p>
+                    <p className="font-semibold text-slate-900 mt-1">{e.status.replace(/_/g, ' ')}</p>
                   </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* [3] Tabbed Detail Panel */}
-          <div className="rounded-xl border border-gray-200 shadow-sm bg-white overflow-hidden">
-            <div className="flex border-b border-gray-200">
-              {TABS.map(tab => (
-                <button
-                  key={tab.key}
-                  onClick={() => setActiveTab(tab.key)}
-                  className="px-5 py-3.5 text-sm font-medium transition-colors relative"
-                  style={{ color: activeTab === tab.key ? '#D95F0E' : '#64748B' }}
-                >
-                  {tab.label}
-                  {activeTab === tab.key && (
-                    <div
-                      className="absolute bottom-0 left-0 right-0 h-0.5 rounded-t-full"
-                      style={{ backgroundColor: '#D95F0E' }}
-                    />
-                  )}
-                </button>
-              ))}
-            </div>
-            <div className="p-5">
-              {activeTab === 'menu'      && <MenuTab eventId={id} />}
-              {activeTab === 'notes'     && <NotesTab event={e} onSaved={() => qc.invalidateQueries({ queryKey: ['event', id] })} />}
-              {activeTab === 'quotation' && <QuotationTab eventId={id} eventCode={e.event_code ?? e.event_id ?? id} />}
-              {activeTab === 'activity'  && <ActivityTab eventId={id} />}
+                  <div className="flex items-center gap-2">
+                    {(VALID_TRANSITIONS[e.status] ?? []).includes('CONFIRMED') && (
+                      <button onClick={handleMarkConfirmed} className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700">Mark Confirmed</button>
+                    )}
+                    {e.status !== 'COMPLETED' && e.status !== 'CANCELLED' && (
+                      <button onClick={handleMarkComplete} className="px-3 py-2 rounded-lg border border-slate-300 text-sm font-semibold text-slate-700 hover:bg-slate-50">Mark Complete</button>
+                    )}
+                    {e.status !== 'CANCELLED' && (
+                      <button onClick={() => setCancelConfirm(true)} className="px-3 py-2 rounded-lg border border-red-200 text-sm font-semibold text-red-600 hover:bg-red-50">Cancel Event</button>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>

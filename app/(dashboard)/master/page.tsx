@@ -17,6 +17,11 @@ interface Dish {
   id: string;
   name: string;
   category: string;
+  dish_type: string;
+  veg_non_veg: string;
+  price_unit: string;
+  base_price: string | number;
+  selling_price: string | number;
   unit_type?: string;
   is_active: boolean;
   has_recipe?: boolean;
@@ -60,8 +65,17 @@ const ING_CATEGORY_OPTIONS = [
   { value: 'BEEF',       label: 'Beef' },
   { value: 'MUTTON',     label: 'Mutton' },
   { value: 'FISH',       label: 'Fish' },
+  { value: 'MEAT',       label: 'Meat' },
   { value: 'OTHER',      label: 'Other' },
-];
+] as const;
+
+const ING_CATEGORY_VALUES = new Set<string>(ING_CATEGORY_OPTIONS.map(c => c.value));
+
+/** Validate a raw category string against backend choices. Falls back to 'GROCERY'. */
+function resolveCategory(raw: string): string {
+  const upper = raw.trim().toUpperCase();
+  return ING_CATEGORY_VALUES.has(upper) ? upper : 'GROCERY';
+}
 
 // Dish.UnitType choices: PLATE KG PIECE LITRE PORTION
 const DISH_UNIT_OPTIONS = [
@@ -70,7 +84,27 @@ const DISH_UNIT_OPTIONS = [
   { value: 'PIECE', label: 'Piece' },
   { value: 'LITRE', label: 'Litre' },
   { value: 'PORTION', label: 'Portion' },
-];
+] as const;
+
+// Dish.DishType choices
+const DISH_TYPE_OPTIONS = [
+  { value: 'recipe',       label: 'Recipe' },
+  { value: 'live_counter', label: 'Live Counter' },
+  { value: 'fixed_price',  label: 'Fixed Price' },
+] as const;
+
+// Dish.VegNonVeg choices
+const VEG_OPTIONS = [
+  { value: 'veg',     label: 'Veg' },
+  { value: 'non_veg', label: 'Non-Veg' },
+] as const;
+
+// Dish.PriceUnit choices
+const PRICE_UNIT_OPTIONS = [
+  { value: 'per_plate', label: 'Per Plate' },
+  { value: 'per_kg',    label: 'Per KG' },
+  { value: 'per_piece', label: 'Per Piece' },
+] as const;
 
 // Ingredient.UOM choices: kg g litre ml piece
 const ING_UOM_OPTIONS = [
@@ -190,7 +224,11 @@ function Drawer({ open, onClose, title, children, footer }: {
 
 // ─── Dish Form Drawer ─────────────────────────────────────────────────────────
 
-const EMPTY_DISH = { name: '', category: '', unit_type: 'PLATE', is_active: true };
+const EMPTY_DISH = {
+  name: '', category: '', dish_type: 'recipe', veg_non_veg: 'veg',
+  price_unit: 'per_plate', base_price: '', selling_price: '',
+  unit_type: 'PLATE', is_active: true,
+};
 
 function DishDrawer({ open, onClose, editing, onSaved }: {
   open: boolean; onClose: () => void; editing: Dish | null; onSaved: () => void;
@@ -202,8 +240,15 @@ function DishDrawer({ open, onClose, editing, onSaved }: {
 
   useEffect(() => {
     setForm(editing ? {
-      name: editing.name, category: editing.category ?? '',
-      unit_type: editing.unit_type ?? 'PLATE', is_active: editing.is_active,
+      name:          editing.name          ?? '',
+      category:      editing.category      ?? '',
+      dish_type:     editing.dish_type     ?? 'recipe',
+      veg_non_veg:   editing.veg_non_veg   ?? 'veg',
+      price_unit:    editing.price_unit    ?? 'per_plate',
+      base_price:    String(editing.base_price    ?? ''),
+      selling_price: String(editing.selling_price ?? ''),
+      unit_type:     editing.unit_type     ?? 'PLATE',
+      is_active:     editing.is_active,
     } : { ...EMPTY_DISH });
     setFieldErrors({});
   }, [editing, open]);
@@ -212,7 +257,16 @@ function DishDrawer({ open, onClose, editing, onSaved }: {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!form.name.trim()) return;
+    // Client-side validation — mirrors backend required fields
+    const errs: Record<string, string> = {};
+    if (!form.name.trim())      errs.name          = 'Required';
+    if (!form.dish_type)        errs.dish_type      = 'Required';
+    if (!form.veg_non_veg)      errs.veg_non_veg    = 'Required';
+    if (!form.price_unit)       errs.price_unit     = 'Required';
+    if (!form.base_price)       errs.base_price     = 'Required';
+    if (!form.selling_price)    errs.selling_price  = 'Required';
+    if (Object.keys(errs).length) { setFieldErrors(errs); return; }
+
     setSaving(true);
     setFieldErrors({});
     try {
@@ -256,14 +310,28 @@ function DishDrawer({ open, onClose, editing, onSaved }: {
         </div>
       }>
       <form ref={formRef} onSubmit={submit} className="flex flex-col gap-4">
+
+        {/* Dish Name */}
         <div>
           <label className={lbl} style={{ color: '#0F172A' }}>Dish Name <span style={{ color: '#DC2626' }}>*</span></label>
-          <input className={inp} style={fieldErrors.name ? ist_err : ist} required value={form.name}
+          <input className={inp} style={fieldErrors.name ? ist_err : ist} value={form.name}
             onChange={e => set('name', e.target.value)} placeholder="e.g. Chicken Biryani"
             onFocus={e => { if (!fieldErrors.name) e.currentTarget.style.borderColor = '#D95F0E'; }}
             onBlur={e => { if (!fieldErrors.name) e.currentTarget.style.borderColor = '#E2E8F0'; }} />
           <FieldError msg={fieldErrors.name} />
         </div>
+
+        {/* Dish Type */}
+        <div>
+          <label className={lbl} style={{ color: '#0F172A' }}>Dish Type <span style={{ color: '#DC2626' }}>*</span></label>
+          <select className={inp} style={fieldErrors.dish_type ? ist_err : ist} value={form.dish_type}
+            onChange={e => set('dish_type', e.target.value)}>
+            {DISH_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+          <FieldError msg={fieldErrors.dish_type} />
+        </div>
+
+        {/* Category + Unit Type */}
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className={lbl} style={{ color: '#0F172A' }}>Category</label>
@@ -283,6 +351,44 @@ function DishDrawer({ open, onClose, editing, onSaved }: {
             <FieldError msg={fieldErrors.unit_type} />
           </div>
         </div>
+
+        {/* Veg / Non-Veg + Price Unit */}
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className={lbl} style={{ color: '#0F172A' }}>Veg / Non-Veg <span style={{ color: '#DC2626' }}>*</span></label>
+            <select className={inp} style={fieldErrors.veg_non_veg ? ist_err : ist} value={form.veg_non_veg}
+              onChange={e => set('veg_non_veg', e.target.value)}>
+              {VEG_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+            <FieldError msg={fieldErrors.veg_non_veg} />
+          </div>
+          <div>
+            <label className={lbl} style={{ color: '#0F172A' }}>Price Unit <span style={{ color: '#DC2626' }}>*</span></label>
+            <select className={inp} style={fieldErrors.price_unit ? ist_err : ist} value={form.price_unit}
+              onChange={e => set('price_unit', e.target.value)}>
+              {PRICE_UNIT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+            <FieldError msg={fieldErrors.price_unit} />
+          </div>
+        </div>
+
+        {/* Base Price + Selling Price */}
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className={lbl} style={{ color: '#0F172A' }}>Base Price (₹) <span style={{ color: '#DC2626' }}>*</span></label>
+            <input type="number" min="0" step="0.01" className={inp} style={fieldErrors.base_price ? ist_err : ist}
+              placeholder="0.00" value={form.base_price} onChange={e => set('base_price', e.target.value)} />
+            <FieldError msg={fieldErrors.base_price} />
+          </div>
+          <div>
+            <label className={lbl} style={{ color: '#0F172A' }}>Selling Price (₹) <span style={{ color: '#DC2626' }}>*</span></label>
+            <input type="number" min="0" step="0.01" className={inp} style={fieldErrors.selling_price ? ist_err : ist}
+              placeholder="0.00" value={form.selling_price} onChange={e => set('selling_price', e.target.value)} />
+            <FieldError msg={fieldErrors.selling_price} />
+          </div>
+        </div>
+
+        {/* Server-side field errors */}
         {fieldErrors.non_field_errors && (
           <div className="rounded-lg px-3 py-2 text-sm" style={{ backgroundColor: '#FEF2F2', color: '#DC2626', border: '1px solid #FECACA' }}>
             {fieldErrors.non_field_errors}
@@ -293,6 +399,8 @@ function DishDrawer({ open, onClose, editing, onSaved }: {
             {fieldErrors.detail}
           </div>
         )}
+
+        {/* Active toggle */}
         <label className="flex items-center gap-2 cursor-pointer">
           <div onClick={() => set('is_active', !form.is_active)}
             className="relative w-9 h-5 rounded-full transition-colors"
@@ -377,7 +485,7 @@ function RecipeEditorDrawer({ dish, open, onClose, onSaved }: {
         ingredient: ingId,
         ingredient_name: r.ingredient_name ?? r.ingredient_display ?? '',
         ingredient_unit: normalizeUnit(r.ingredient_uom ?? r.ingredient_unit ?? r.unit),
-        ingredient_category: r.ingredient_category ?? ingMaster?.category ?? '',
+        ingredient_category: resolveCategory(r.ingredient_category ?? ingMaster?.category ?? ''),
         quantity: String(r.qty_per_unit ?? r.quantity ?? ''),
         unit: normalizeUnit(r.unit ?? r.ingredient_uom ?? ''),
         rate: '',
@@ -403,7 +511,7 @@ function RecipeEditorDrawer({ dish, open, onClose, onSaved }: {
       ingredient: ing.id,
       ingredient_name: ing.name,
       ingredient_unit: normalizeUnit(ing.unit_of_measure),
-      ingredient_category: ing.category,
+      ingredient_category: resolveCategory(ing.category),
       unit: normalizeUnit(ing.unit_of_measure),
     } : line));
     setActiveRow(null);
@@ -447,7 +555,7 @@ function RecipeEditorDrawer({ dish, open, onClose, onSaved }: {
             try {
               const created: Ingredient = await api.post('/master/ingredients/', {
                 name: line.ingredient_name.trim(),
-                category: line.ingredient_category || 'GROCERY',
+                category: resolveCategory(line.ingredient_category || 'GROCERY'),
                 unit_of_measure: toBackendUOM(line.unit || 'KG'),
                 is_active: true,
               });
@@ -516,7 +624,7 @@ function RecipeEditorDrawer({ dish, open, onClose, onSaved }: {
         const qty = String(r[2] ?? '').trim();
         const unitRaw = String(r[3] ?? '').trim();
         const rate = String(r[4] ?? '').trim();
-        const category = ING_CATEGORY_OPTIONS.find(c => c.value === rawCat)?.value ?? (rawCat || 'GROCERY');
+        const category = resolveCategory(rawCat);
         const unit = normalizeUnit(unitRaw) || 'KG';
         const matchedIng =
           allIngredients.find(i => i.name.toLowerCase() === rawName.toLowerCase()) ??

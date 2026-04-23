@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useRouter } from 'next/navigation';
+import { useRouter, useParams } from 'next/navigation';
 import {
   Plus, Search, Pencil, ArrowRightCircle, Trash2,
   ChevronLeft, ChevronRight, X, Loader2, FileSpreadsheet, Users,
@@ -31,14 +31,13 @@ interface Lead {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const STATUSES = ['All', 'NEW', 'QUALIFIED', 'FOLLOW_UP', 'CONVERTED', 'LOST'];
+const STATUSES = ['All', 'NEW', 'QUALIFIED', 'FOLLOW_UP', 'REJECTED'];
 
 const STATUS_STYLE: Record<string, { bg: string; color: string }> = {
-  NEW:        { bg: '#EFF6FF', color: '#3B82F6' },
-  QUALIFIED:  { bg: '#F5F3FF', color: '#7C3AED' },
-  FOLLOW_UP:  { bg: '#FFF7ED', color: '#F97316' },
-  CONVERTED:  { bg: '#ECFDF5', color: '#0D9488' },
-  LOST:       { bg: '#FEF2F2', color: '#DC2626' },
+  NEW:       { bg: '#EFF6FF', color: '#3B82F6' },
+  QUALIFIED: { bg: '#F5F3FF', color: '#7C3AED' },
+  FOLLOW_UP: { bg: '#FFF7ED', color: '#F97316' },
+  REJECTED:  { bg: '#FEF2F2', color: '#DC2626' },
 };
 
 const SOURCE_CHANNELS = [
@@ -434,7 +433,7 @@ function LeadDrawer({
                 value={form.status} onChange={e => set('status', e.target.value)}
                 onFocus={e => (e.currentTarget.style.borderColor = '#D95F0E')}
                 onBlur={e => (e.currentTarget.style.borderColor = '#E2E8F0')}>
-                {['NEW', 'QUALIFIED', 'FOLLOW_UP', 'LOST'].map(s =>
+                {['NEW', 'QUALIFIED', 'FOLLOW_UP', 'REJECTED'].map(s =>
                   <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
               </select>
             </div>
@@ -473,6 +472,7 @@ function LeadDrawer({
 
 export default function LeadsPage() {
   const router = useRouter();
+  const { slug } = useParams<{ slug: string }>();
   const qc = useQueryClient();
 
   // Filter state
@@ -531,7 +531,7 @@ export default function LeadsPage() {
     setStatusFilter('All');
   }
 
-  function openNew() { setEditing(null); setDrawerOpen(true); }
+  function openNew() { router.push(`/app/${slug}/enquiries/create`); }
   function openEdit(lead: Lead) { setEditing(lead); setDrawerOpen(true); }
 
   async function handleDeleteConfirm() {
@@ -730,7 +730,7 @@ export default function LeadsPage() {
                           title="Edit">
                           <Pencil size={14} style={{ color: '#64748B' }} />
                         </button>
-                        {lead.status !== 'CONVERTED' && lead.status !== 'LOST' && (
+                        {lead.status !== 'REJECTED' && (
                           <button
                             onClick={() => handleConvert(lead)}
                             disabled={convertingId === lead.id}
