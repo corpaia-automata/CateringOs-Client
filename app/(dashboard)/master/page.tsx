@@ -17,6 +17,7 @@ interface Dish {
   id: string;
   name: string;
   category: string;
+  category_name?: string | null;
   dish_type: string;
   veg_non_veg: string;
   price_unit: string;
@@ -48,6 +49,35 @@ interface RecipeLine {
   quantity: string;
   unit?: string;
   rate?: string;
+}
+
+function isUuidLike(value?: string | null) {
+  if (!value) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+interface GlobalDishCategoryRow {
+  id: string;
+  name: string;
+}
+
+function normalizeDishCatLabel(s: string) {
+  return s.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function dishCategoryIdForForm(dish: Dish | null, apiCats: GlobalDishCategoryRow[]): string {
+  if (!dish) return '';
+  const raw = (dish.category ?? '').trim();
+  if (isUuidLike(raw)) return raw;
+  if (!apiCats.length) return '';
+  const label = (dish.category_name ?? raw).trim();
+  if (!label) return '';
+  const key = normalizeDishCatLabel(label);
+  let hit = apiCats.find(c => normalizeDishCatLabel(c.name) === key);
+  if (hit) return hit.id;
+  const stripPlural = (x: string) => (x.endsWith('s') && x.length > 1 ? x.slice(0, -1) : x);
+  hit = apiCats.find(c => stripPlural(normalizeDishCatLabel(c.name)) === stripPlural(key));
+  return hit?.id ?? '';
 }
 
 // ─── Constants (values must match backend model choices exactly) ────────────────
@@ -230,6 +260,19 @@ const EMPTY_DISH = {
   unit_type: 'PLATE', is_active: true,
 };
 
+function servingUnitFromDrawerForm(priceUnit: string, unitType: string): string {
+  const fromPrice: Record<string, string> = {
+    per_plate: 'PLATE',
+    per_kg: 'KG',
+    per_piece: 'PIECE',
+  };
+  const pu = (priceUnit || '').toLowerCase();
+  if (fromPrice[pu]) return fromPrice[pu];
+  const ut = (unitType || 'PLATE').toUpperCase();
+  if (['PLATE', 'KG', 'PIECE', 'LITRE', 'PORTION'].includes(ut)) return ut;
+  return 'PLATE';
+}
+
 function DishDrawer({ open, onClose, editing, onSaved }: {
   open: boolean; onClose: () => void; editing: Dish | null; onSaved: () => void;
 }) {
@@ -237,11 +280,29 @@ function DishDrawer({ open, onClose, editing, onSaved }: {
   const [saving, setSaving] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const formRef = useRef<HTMLFormElement>(null);
+  const [dishCategories, setDishCategories] = useState<GlobalDishCategoryRow[]>([]);
+  const [dishCategoriesLoading, setDishCategoriesLoading] = useState(false);
 
   useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setDishCategoriesLoading(true);
+    api.get('/categories/')
+      .then((data: unknown) => {
+        if (cancelled) return;
+        const list = Array.isArray(data) ? (data as GlobalDishCategoryRow[]) : [];
+        setDishCategories([...list].sort((a, b) => a.name.localeCompare(b.name)));
+      })
+      .catch(() => { if (!cancelled) toast.error('Failed to load categories'); })
+      .finally(() => { if (!cancelled) setDishCategoriesLoading(false); });
+    return () => { cancelled = true; };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
     setForm(editing ? {
       name:          editing.name          ?? '',
-      category:      editing.category      ?? '',
+      category:      isUuidLike(editing.category) ? (editing.category ?? '') : '',
       dish_type:     editing.dish_type     ?? 'recipe',
       veg_non_veg:   editing.veg_non_veg   ?? 'veg',
       price_unit:    editing.price_unit    ?? 'per_plate',
@@ -252,6 +313,15 @@ function DishDrawer({ open, onClose, editing, onSaved }: {
     } : { ...EMPTY_DISH });
     setFieldErrors({});
   }, [editing, open]);
+
+  useEffect(() => {
+    if (!open || !editing || !dishCategories.length) return;
+    setForm(f => {
+      if (f.category) return f;
+      const id = dishCategoryIdForForm(editing, dishCategories);
+      return id ? { ...f, category: id } : f;
+    });
+  }, [editing, open, dishCategories]);
 
   function set(k: string, v: any) { setForm(f => ({ ...f, [k]: v })); setFieldErrors(e => ({ ...e, [k]: '' })); }
 
@@ -269,10 +339,21 @@ function DishDrawer({ open, onClose, editing, onSaved }: {
 
     setSaving(true);
     setFieldErrors({});
+    const { category: catId, price_unit, unit_type, ...rest } = form;
+    const payload: Record<string, unknown> = {
+      name:          rest.name.trim(),
+      dish_type:     rest.dish_type,
+      veg_non_veg:   rest.veg_non_veg,
+      base_price:    rest.base_price,
+      selling_price: rest.selling_price,
+      is_active:     rest.is_active,
+      serving_unit:  servingUnitFromDrawerForm(price_unit, unit_type),
+    };
+    if (catId) payload.category = catId;
     try {
       editing
-        ? await api.patch(`/master/dishes/${editing.id}/`, form)
-        : await api.post('/master/dishes/', form);
+        ? await api.patch(`/master/dishes/${editing.id}/`, payload)
+        : await api.post('/master/dishes/', payload);
       toast.success(editing ? 'Dish updated' : 'Dish created successfully');
       onSaved(); onClose();
     } catch (err: any) {
@@ -337,8 +418,10 @@ function DishDrawer({ open, onClose, editing, onSaved }: {
             <label className={lbl} style={{ color: '#0F172A' }}>Category</label>
             <select className={inp} style={fieldErrors.category ? ist_err : ist} value={form.category}
               onChange={e => set('category', e.target.value)}>
-              <option value="">Select</option>
-              {DISH_CATEGORIES.filter(c => c !== 'All').map(c => <option key={c} value={c}>{c}</option>)}
+              <option value="">{dishCategoriesLoading ? 'Loading…' : 'Select'}</option>
+              {dishCategories.map(c => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
             </select>
             <FieldError msg={fieldErrors.category} />
           </div>

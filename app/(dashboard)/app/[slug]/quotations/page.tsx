@@ -1,757 +1,1123 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
-import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
+import Link from 'next/link';
+import { Fragment, useMemo, useState, useCallback, useEffect, useRef } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 import {
-  Plus, Search, Pencil, Mail, ChevronLeft, ChevronRight,
-  Download, X, Loader2, FileText,
+  ArrowDownToLine,
+  Calendar,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ClipboardList,
+  Copy,
+  Eye,
+  FileText,
+  MoreHorizontal,
+  PencilLine,
+  Trash2,
+  X,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { NewQuotationModal } from '@/components/quotations/QuotationsPricingModals';
+import {
+  type QuotationRecord,
+  type QuotationUiStatus,
+  matchesSearchRow,
+  deleteQuotationGroup,
+  getPreviousRevisionsDesc,
+  getRevisionsTimelineDesc,
+  getGroupRevisions,
+} from '@/lib/quotationsRevisions';
+import {
+  apiQuotationToRecord,
+  apiHistoryToRecords,
+  type ApiQuotationRow,
+} from '@/lib/mapQuotationApi';
+import { authStorage } from '@/lib/auth';
 import { api } from '@/lib/api';
 import { Skeleton } from '@/components/ui/skeleton';
+import { groupQuotationsByClient } from '@/lib/groupQuotationsByClient';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+const NAVY = '#1a1a2e';
+const BORDER = '#e0e0e0';
 
-interface Quotation {
-  id: string;
-  quote_number: string;
-  event: string;
-  event_code: string;
-  client_name: string;
-  event_type: string;
-  event_date: string | null;
-  version: number;
-  status: string;
-  subtotal: string;
-  service_charge: string;
-  total_amount: string;
-  notes: string;
-  created_at: string;
+const TEMPLATE_NAMES = [
+  'All templates',
+  'Corporate Lunch',
+  'Wedding Buffet',
+  'Standard Banquet',
+  'Evening Gala',
+];
+
+const PAGE_SIZES = [10, 25, 50] as const;
+
+function rupee(n: number) {
+  const s = '\u20B9 ' + n.toLocaleString('en-IN', { maximumFractionDigits: 0 });
+  return s;
 }
 
-interface EventOption {
-  id: string;
-  event_code: string;
-  customer_name: string;
-  event_type: string;
-  event_date: string | null;
+function formatEventDay(iso: string) {
+  return new Date(`${iso}T12:00:00`).toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
 }
 
-interface PaginatedResponse {
-  count: number;
-  results: Quotation[];
+function formatCreatedOn(iso: string) {
+  const d = new Date(iso);
+  const date = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  const time = d.toLocaleTimeString('en-IN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  }).toUpperCase();
+  return { date, time };
 }
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-const STATUSES = ['All', 'DRAFT', 'SENT', 'ACCEPTED', 'REJECTED'];
-
-const STATUS_STYLE: Record<string, { bg: string; color: string }> = {
-  DRAFT:    { bg: '#F1F5F9', color: '#64748B' },
-  SENT:     { bg: '#EFF6FF', color: '#3B82F6' },
-  ACCEPTED: { bg: '#ECFDF5', color: '#0D9488' },
-  REJECTED: { bg: '#FEF2F2', color: '#DC2626' },
-};
-
-const PAGE_SIZES = [10, 25, 50];
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function fmtDate(d?: string | null) {
-  if (!d) return '—';
-  return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+function shortDate(iso: string) {
+  return new Date(iso).toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
 }
 
-function fmtAmount(v?: string | number | null) {
-  if (v == null || v === '') return '—';
-  const n = typeof v === 'string' ? parseFloat(v) : v;
-  if (isNaN(n)) return '—';
-  return '₹' + n.toLocaleString('en-IN', { maximumFractionDigits: 0 });
-}
-
-// ─── Status Badge ─────────────────────────────────────────────────────────────
-
-function StatusBadge({ status }: { status: string }) {
-  const s = STATUS_STYLE[status] ?? { bg: '#F1F5F9', color: '#64748B' };
+function tableStatusBadge(status: QuotationUiStatus) {
+  const map: Record<QuotationUiStatus, {
+    dot: string;
+    text: string;
+    bg: string;
+    border: string;
+    label: string;
+  }> = {
+    Sent: {
+      dot: '#1565c0',
+      text: '#1565c0',
+      bg: '#e3f2fd',
+      border: '#e3f2fd',
+      label: 'Sent',
+    },
+    Draft: {
+      dot: '#f59e0b',
+      text: '#f59e0b',
+      bg: '#fff8e1',
+      border: '#fff8e1',
+      label: 'Draft',
+    },
+    Accepted: {
+      dot: '#2e7d32',
+      text: '#2e7d32',
+      bg: '#e8f5e9',
+      border: '#e8f5e9',
+      label: 'Accepted',
+    },
+    Declined: {
+      dot: '#c62828',
+      text: '#c62828',
+      bg: '#ffebee',
+      border: '#ffebee',
+      label: 'Declined',
+    },
+  };
+  const c = map[status];
   return (
     <span
-      className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold tracking-wide"
-      style={{ backgroundColor: s.bg, color: s.color }}
+      className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold"
+      style={{
+        borderColor: c.border,
+        backgroundColor: c.bg,
+        color: c.text,
+      }}
     >
-      {status}
+      <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: c.dot }} />
+      {c.label}
     </span>
   );
 }
 
-// ─── Pricing Panel (replaces EditModal) ──────────────────────────────────────
-
-function PricingPanel({
-  quotation,
-  onClose,
-  onSaved,
-}: {
-  quotation: Quotation;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const isDraft     = quotation.status === 'DRAFT';
-  const isFinalised = quotation.status === 'SENT' || quotation.status === 'ACCEPTED';
-
-  // Fix float precision from DB values
-  const internalCost = parseFloat(Number(quotation.subtotal).toFixed(2)) || 0;
-  const svcCharge    = parseFloat(Number(quotation.service_charge).toFixed(2)) || 0;
-  const menuTotal    = parseFloat((internalCost + svcCharge).toFixed(2));
-
-  // Editable state — initialise from quotation total (precision-fixed)
-  const [sellingPrice, setSellingPrice]     = useState(
-    parseFloat(Number(quotation.total_amount || menuTotal).toFixed(2))
-  );
-  const [advanceAmount, setAdvanceAmount]   = useState('');
-  const [paymentTerms, setPaymentTerms]     = useState(quotation.notes || '');
-  const [finalising, setFinalising]         = useState(false);
-
-  // Summary numbers
-  const selling      = parseFloat(Number(sellingPrice).toFixed(2)) || 0;
-  const marginNum    = internalCost > 0 ? ((selling - internalCost) / internalCost) * 100 : null;
-  const marginPct    = marginNum !== null ? marginNum.toFixed(1) : null;
-  const marginNeg    = marginPct !== null && parseFloat(marginPct) < 0;
-
-  function fmtPrice(v: number) {
-    return '₹' + v.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function buildPaginationItems(currentPage: number, totalPages: number): (number | 'ellipsis')[] {
+  if (totalPages <= 1) return [1];
+  if (totalPages <= 9) {
+    return Array.from({ length: totalPages }, (_, i) => i + 1);
   }
-
-  async function handleFinalise() {
-    setFinalising(true);
-    try {
-      await api.patch(`/quotations/${quotation.id}/`, {
-        status:       'SENT',
-        sent_at:      new Date().toISOString(),
-        total_amount: parseFloat(Number(sellingPrice).toFixed(2)),
-        notes:        paymentTerms,
-      });
-      toast.success('Quotation finalised & sent!');
-      onSaved();
-      onClose();
-    } catch {
-      toast.error('Failed to finalise quotation');
-    } finally {
-      setFinalising(false);
-    }
+  const items: (number | 'ellipsis')[] = [];
+  const win = new Set<number>([1, totalPages]);
+  for (let p = currentPage - 1; p <= currentPage + 1; p++) {
+    if (p >= 1 && p <= totalPages) win.add(p);
   }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ backgroundColor: 'rgba(15,23,42,0.6)' }}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full flex flex-col"
-        style={{ maxWidth: 540, maxHeight: '92vh', border: '1px solid #E2E8F0' }}>
-
-        {/* ── Header ──────────────────────────────────────────────────────── */}
-        <div className="flex items-center justify-between px-6 py-4 shrink-0"
-          style={{ borderBottom: '1px solid #E2E8F0', backgroundColor: '#F8FAFC' }}>
-          <div>
-            <h3 className="font-bold text-base" style={{ color: '#0F172A' }}>Pricing</h3>
-            <p className="text-xs mt-0.5" style={{ color: '#64748B' }}>
-              {quotation.quote_number} · {quotation.client_name} · Rev. {quotation.version}
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            <StatusBadge status={quotation.status} />
-            <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-200 transition-colors">
-              <X size={16} style={{ color: '#64748B' }} />
-            </button>
-          </div>
-        </div>
-
-        {/* ── Scrollable Body ──────────────────────────────────────────────── */}
-        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
-
-          {/* ── Top info cards ─────────────────────────────────────────────── */}
-          <div className="grid grid-cols-2 gap-3">
-            {/* INTERNAL COST */}
-            <div className="rounded-xl p-4" style={{ backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0' }}>
-              <p className="text-[10px] font-bold uppercase tracking-widest mb-0.5" style={{ color: '#64748B' }}>
-                Internal Cost
-              </p>
-              <p className="text-xs mb-2" style={{ color: '#94A3B8' }}>Total from costing sheet</p>
-              <p className="text-lg font-black" style={{ color: '#0F172A' }}>{fmtPrice(internalCost)}</p>
-            </div>
-            {/* CALCULATED FROM MENU */}
-            <div className="rounded-xl p-4" style={{ backgroundColor: '#EFF6FF', border: '1px solid #BFDBFE' }}>
-              <p className="text-[10px] font-bold uppercase tracking-widest mb-0.5" style={{ color: '#3B82F6' }}>
-                Calculated From Menu
-              </p>
-              <p className="text-xs mb-2" style={{ color: '#60A5FA' }}>Dishes + services total</p>
-              <p className="text-lg font-black" style={{ color: '#1E40AF' }}>{fmtPrice(menuTotal)}</p>
-            </div>
-          </div>
-
-          <div style={{ height: 1, backgroundColor: '#F1F5F9' }} />
-
-          {/* ── Editable fields ─────────────────────────────────────────────── */}
-          <div className="space-y-4">
-
-            {/* Final Selling Price */}
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wide mb-1.5" style={{ color: '#94A3B8' }}>
-                Final Selling Price (₹)
-              </label>
-              {isDraft ? (
-                <input
-                  type="number"
-                  value={Number(sellingPrice).toFixed(2)}
-                  onChange={e => setSellingPrice(parseFloat(e.target.value) || 0)}
-                  step="0.01"
-                  className="w-full px-3 py-2.5 rounded-lg text-sm outline-none font-semibold"
-                  style={{ border: '1.5px solid #E2E8F0', color: '#0F172A' }}
-                />
-              ) : (
-                <p className="text-base font-bold" style={{ color: '#0F172A' }}>{fmtPrice(selling)}</p>
-              )}
-            </div>
-
-            {/* Advance Amount */}
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wide mb-1.5" style={{ color: '#94A3B8' }}>
-                Advance Amount (₹)
-              </label>
-              {isDraft ? (
-                <input
-                  type="number"
-                  value={advanceAmount}
-                  onChange={e => setAdvanceAmount(e.target.value)}
-                  step="0.01"
-                  placeholder="0.00"
-                  className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
-                  style={{ border: '1.5px solid #E2E8F0', color: '#0F172A' }}
-                />
-              ) : (
-                <p className="text-base font-semibold" style={{ color: '#0F172A' }}>
-                  {advanceAmount
-                    ? fmtPrice(parseFloat(Number(advanceAmount).toFixed(2)))
-                    : <span style={{ color: '#94A3B8' }}>—</span>}
-                </p>
-              )}
-            </div>
-
-            {/* Payment Terms */}
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wide mb-1.5" style={{ color: '#94A3B8' }}>
-                Payment Terms
-              </label>
-              {isDraft ? (
-                <textarea
-                  value={paymentTerms}
-                  onChange={e => setPaymentTerms(e.target.value)}
-                  rows={3}
-                  placeholder="e.g. 50% advance, balance on event day…"
-                  className="w-full px-3 py-2.5 rounded-lg text-sm outline-none resize-none"
-                  style={{ border: '1.5px solid #E2E8F0', color: '#0F172A' }}
-                />
-              ) : (
-                <p className="text-sm leading-relaxed" style={{ color: '#334155' }}>
-                  {paymentTerms || <span style={{ color: '#94A3B8', fontStyle: 'italic' }}>No payment terms specified.</span>}
-                </p>
-              )}
-            </div>
-          </div>
-
-          {/* ── Summary cards ────────────────────────────────────────────────── */}
-          <div className="grid grid-cols-3 gap-2">
-            {/* SELLING */}
-            <div className="rounded-xl p-3 text-center" style={{ backgroundColor: '#F0FDF4', border: '1px solid #BBF7D0' }}>
-              <p className="text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: '#16A34A' }}>Selling</p>
-              <p className="text-sm font-black" style={{ color: '#15803D' }}>
-                ₹{selling.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-              </p>
-            </div>
-            {/* COST */}
-            <div className="rounded-xl p-3 text-center" style={{ backgroundColor: '#FEF2F2', border: '1px solid #FECACA' }}>
-              <p className="text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: '#DC2626' }}>Cost</p>
-              <p className="text-sm font-black" style={{ color: '#B91C1C' }}>
-                ₹{internalCost.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-              </p>
-            </div>
-            {/* MARGIN */}
-            <div className="rounded-xl p-3 text-center" style={{ backgroundColor: '#FEFCE8', border: '1px solid #FDE68A' }}>
-              <p className="text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: '#CA8A04' }}>Margin</p>
-              <p className="text-sm font-black" style={{ color: marginNeg ? '#DC2626' : '#A16207' }}>
-                {marginPct !== null ? `${marginPct}%` : '—'}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* ── Footer ───────────────────────────────────────────────────────── */}
-        <div className="px-6 pt-3 pb-5 shrink-0 space-y-2" style={{ borderTop: '1px solid #F1F5F9' }}>
-          {/* Finalise button — only visible when DRAFT */}
-          {isDraft && (
-            <button
-              onClick={handleFinalise}
-              disabled={finalising}
-              className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-bold text-white transition-opacity"
-              style={{ background: 'linear-gradient(135deg, #16A34A, #15803D)', opacity: finalising ? 0.7 : 1 }}
-            >
-              {finalising
-                ? <Loader2 size={14} className="animate-spin" />
-                : <span>✓</span>}
-              Finalise &amp; Send Quotation (Rev. {quotation.version})
-            </button>
-          )}
-          <button
-            onClick={onClose}
-            className="w-full px-4 py-2.5 rounded-xl text-sm font-medium"
-            style={{ border: '1.5px solid #E2E8F0', color: '#64748B' }}
-          >
-            {isFinalised ? 'Close' : 'Cancel'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+  const sorted = [...win].sort((a, b) => a - b);
+  for (let i = 0; i < sorted.length; i++) {
+    const p = sorted[i];
+    if (i > 0 && p - sorted[i - 1] > 1) items.push('ellipsis');
+    items.push(p);
+  }
+  return items;
 }
 
-// ─── New Quotation Modal ───────────────────────────────────────────────────────
-
-function NewQuotationModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
-  const [search, setSearch]       = useState('');
-  const [selected, setSelected]   = useState<EventOption | null>(null);
-  const [creating, setCreating]   = useState(false);
-
-  const { data: events, isLoading } = useQuery<EventOption[]>({
-    queryKey: ['events-for-quotation', search],
-    queryFn: () => api.get(`/events/?search=${encodeURIComponent(search)}&page_size=20`).then((r) => r.results ?? r),
-    staleTime: 30_000,
-  });
-
-  async function handleCreate() {
-    if (!selected) return;
-    setCreating(true);
-    try {
-      await api.post('/quotations/', { event: selected.id });
-      toast.success('Quotation created');
-      onCreated();
-      onClose();
-    } catch {
-      toast.error('Failed to create quotation');
-    } finally {
-      setCreating(false);
-    }
+function normalizeListPayload(data: unknown): ApiQuotationRow[] {
+  if (data == null) return [];
+  if (Array.isArray(data)) return data as ApiQuotationRow[];
+  if (typeof data === 'object' && 'results' in data && Array.isArray((data as { results: unknown }).results)) {
+    return (data as { results: ApiQuotationRow[] }).results;
   }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ backgroundColor: 'rgba(15,23,42,0.55)' }}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full overflow-hidden" style={{ maxWidth: 500, border: '1px solid #E2E8F0' }}>
-
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: '#E2E8F0', backgroundColor: '#F8FAFC' }}>
-          <div>
-            <h3 className="font-bold text-base" style={{ color: '#0F172A' }}>New Quotation</h3>
-            <p className="text-xs mt-0.5" style={{ color: '#64748B' }}>Select an event to generate a quotation</p>
-          </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-200 transition-colors">
-            <X size={16} style={{ color: '#64748B' }} />
-          </button>
-        </div>
-
-        {/* Search */}
-        <div className="px-6 pt-5 pb-3">
-          <div className="flex items-center gap-2 px-3 py-2 rounded-lg" style={{ border: '1.5px solid #E2E8F0' }}>
-            <Search size={14} style={{ color: '#94A3B8', flexShrink: 0 }} />
-            <input
-              type="text"
-              value={search}
-              onChange={e => { setSearch(e.target.value); setSelected(null); }}
-              placeholder="Search event or client name..."
-              className="flex-1 text-sm outline-none bg-transparent"
-              style={{ color: '#0F172A' }}
-              autoFocus
-            />
-          </div>
-        </div>
-
-        {/* Event list */}
-        <div className="px-6 pb-3 max-h-60 overflow-y-auto space-y-1.5">
-          {isLoading && (
-            <div className="space-y-2 py-2">
-              {[1,2,3].map(i => <Skeleton key={i} className="h-14 rounded-lg w-full" />)}
-            </div>
-          )}
-          {!isLoading && (!events || events.length === 0) && (
-            <p className="text-center text-sm py-6" style={{ color: '#94A3B8' }}>No events found</p>
-          )}
-          {events?.map(ev => (
-            <button
-              key={ev.id}
-              onClick={() => setSelected(ev)}
-              className="w-full text-left px-3 py-2.5 rounded-lg transition-all"
-              style={{
-                border: `1.5px solid ${selected?.id === ev.id ? '#16a34a' : '#E2E8F0'}`,
-                background: selected?.id === ev.id ? '#F0FDF4' : '#FAFAFA',
-              }}
-            >
-              <p className="text-sm font-semibold" style={{ color: '#0F172A' }}>{ev.customer_name}</p>
-              <p className="text-xs mt-0.5" style={{ color: '#64748B' }}>
-                {ev.event_code} · {ev.event_type || '—'} · {fmtDate(ev.event_date)}
-              </p>
-            </button>
-          ))}
-        </div>
-
-        {/* Footer */}
-        <div className="flex gap-3 px-6 py-4 border-t" style={{ borderColor: '#E2E8F0' }}>
-          <button
-            onClick={onClose}
-            className="flex-1 px-4 py-2 rounded-lg text-sm font-medium"
-            style={{ border: '1.5px solid #E2E8F0', color: '#64748B' }}
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleCreate}
-            disabled={!selected || creating}
-            className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white"
-            style={{ background: '#D97706', opacity: (!selected || creating) ? 0.6 : 1 }}
-          >
-            {creating && <Loader2 size={14} className="animate-spin" />}
-            Create Quotation
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+  return [];
 }
 
-// ─── Main Page ────────────────────────────────────────────────────────────────
+function QuotationTableSkeletonRow({ zebra }: { zebra: boolean }) {
+  return (
+    <tr style={{ backgroundColor: zebra ? '#fafafa' : '#fff' }}>
+      {Array.from({ length: 9 }).map((_, i) => (
+        <td key={i} className="border-b px-3 py-3" style={{ borderColor: BORDER }}>
+          <Skeleton className="h-[14px] w-full max-w-[10rem] animate-pulse rounded-md bg-[#e8e8e8]" />
+        </td>
+      ))}
+    </tr>
+  );
+}
 
 export default function QuotationsPage() {
   const queryClient = useQueryClient();
+  const router = useRouter();
+  const raw = useParams();
+  const rawSlug = raw?.slug;
+  const slug =
+    typeof rawSlug === 'string'
+      ? rawSlug
+      : Array.isArray(rawSlug)
+        ? String(rawSlug[0] ?? '')
+        : '';
 
-  const [search, setSearch]         = useState('');
-  const [debouncedSearch, setDSrch] = useState('');
-  const [statusFilter, setStatus]   = useState('All');
-  const [dateFrom, setDateFrom]     = useState('');
-  const [dateTo, setDateTo]         = useState('');
-  const [page, setPage]             = useState(1);
-  const [pageSize, setPageSize]     = useState(10);
+  const [quotationRecords, setQuotationRecords] = useState<QuotationRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [refetchKey, setRefetchKey] = useState(0);
+  const [revisionHistoryFetched, setRevisionHistoryFetched] = useState<Set<string>>(new Set());
 
-  const [pricingQuotation, setPricingQuotation] = useState<Quotation | null>(null);
-  const [showNewModal, setShowNewModal]     = useState(false);
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<
+    'All status' | 'Draft' | 'Sent' | 'Accepted' | 'Declined'
+  >('All status');
+  const [templateFilter, setTemplateFilter] = useState<string>('All templates');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [showNewModal, setShowNewModal] = useState(false);
+
+  const [expandedBaseIds, setExpandedBaseIds] = useState<Set<string>>(new Set());
+  const [drawerBaseId, setDrawerBaseId] = useState<string | null>(null);
+
+  const loadRevisionHistory = useCallback(async (inquiryId: string) => {
+    const raw = await api.get(
+      `/quotations/?inquiry=${encodeURIComponent(inquiryId)}&page_size=100`,
+    );
+    const list = normalizeListPayload(raw);
+    const mapped = apiHistoryToRecords(list);
+    setQuotationRecords((prev) => {
+      const rest = prev.filter((r) => r.baseId !== inquiryId);
+      return [...rest, ...mapped];
+    });
+  }, []);
 
   useEffect(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => { setDSrch(search); setPage(1); }, 350);
-    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
-  }, [search]);
+    let cancelled = false;
+    async function loadQuotationsFromApi() {
+      if (!slug) {
+        setLoading(false);
+        setFetchError('Workspace unavailable');
+        setQuotationRecords([]);
+        return;
+      }
+      setLoading(true);
+      setFetchError(null);
+      try {
+        const token = authStorage.getAccess();
+        const qs = new URLSearchParams({
+          slug,
+          latestOnly: 'true',
+          page_size: '100',
+        });
+        const res = await fetch(`/api/quotations?${qs.toString()}`, {
+          headers: {
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        });
+        const payload = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const msg =
+            typeof payload === 'object' && payload && 'detail' in payload
+              ? String((payload as { detail?: string }).detail)
+              : `Request failed (${res.status})`;
+          throw new Error(msg);
+        }
+        if (cancelled) return;
+        const list = normalizeListPayload(payload);
+        const mapped = list.map((q) =>
+          apiQuotationToRecord(q, { isLatestRevision: true }),
+        );
+        setQuotationRecords(mapped);
+        setRevisionHistoryFetched(new Set());
+        setExpandedBaseIds(new Set());
+        setSelectedIds(new Set());
+      } catch (e: unknown) {
+        if (cancelled) return;
+        console.error(e);
+        setFetchError(
+          e instanceof Error ? e.message : 'Failed to load quotations',
+        );
+        setQuotationRecords([]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    void loadQuotationsFromApi();
+    return () => {
+      cancelled = true;
+    };
+  }, [slug, refetchKey]);
 
-  useEffect(() => { setPage(1); }, [statusFilter, dateFrom, dateTo]);
+  const handleExpansionToggle = useCallback(
+    async (row: QuotationRecord) => {
+      const willOpen = !expandedBaseIds.has(row.baseId);
+      setExpandedBaseIds((prev) => {
+        const next = new Set(prev);
+        if (willOpen) next.add(row.baseId);
+        else next.delete(row.baseId);
+        return next;
+      });
+      if (!willOpen || !row.inquiryId) return;
+      if (revisionHistoryFetched.has(row.inquiryId)) return;
+      try {
+        await loadRevisionHistory(row.inquiryId);
+        setRevisionHistoryFetched((s) => new Set(s).add(row.inquiryId!));
+      } catch (e) {
+        console.error(e);
+        toast.error('Could not load revision history');
+      }
+    },
+    [expandedBaseIds, revisionHistoryFetched, loadRevisionHistory],
+  );
 
-  const queryParams = new URLSearchParams({
-    page:      String(page),
-    page_size: String(pageSize),
-    ...(debouncedSearch         ? { search:    debouncedSearch }       : {}),
-    ...(statusFilter !== 'All'  ? { status:    statusFilter }          : {}),
-    ...(dateFrom                ? { date_from: dateFrom }              : {}),
-    ...(dateTo                  ? { date_to:   dateTo }                : {}),
-  });
+  const handleCreateRevisionApi = useCallback(
+    async (baseId: string) => {
+      const latest = quotationRecords.find(
+        (r) => r.baseId === baseId && r.isLatestRevision,
+      );
+      if (!latest) return;
+      try {
+        await api.post(`/quotations/${latest.recordId}/revise/`, {});
+        toast.success('New draft revision created');
+        setRefetchKey((k) => k + 1);
+      } catch (e: unknown) {
+        console.error(e);
+        toast.error(
+          e instanceof Error ? e.message : 'Could not create revision',
+        );
+      }
+    },
+    [quotationRecords],
+  );
 
-  const { data, isLoading, isFetching } = useQuery<PaginatedResponse>({
-    queryKey: ['quotations', page, pageSize, debouncedSearch, statusFilter, dateFrom, dateTo],
-    queryFn: () => api.get(`/quotations/?${queryParams}`),
-    staleTime: 30_000,
-  });
+  const handleDeleteGroupApi = useCallback(
+    async (baseId: string) => {
+      const clientLabel =
+        quotationRecords.find((r) => r.baseId === baseId)?.clientName ?? 'this quotation';
+      if (
+        !window.confirm(
+          `Delete all quotations for "${clientLabel}"? This cannot be undone.`,
+        )
+      ) {
+        return;
+      }
+      const group = quotationRecords.filter((r) => r.baseId === baseId);
+      const toRemove = new Set(group.map((r) => r.recordId));
+      try {
+        await Promise.all(
+          group.map((r) => api.delete(`/quotations/${r.recordId}/`)),
+        );
+        setQuotationRecords((all) => deleteQuotationGroup(all, baseId));
+        setSelectedIds((prev) =>
+          new Set([...prev].filter((id) => !toRemove.has(id))),
+        );
+        setExpandedBaseIds((prev) => {
+          const next = new Set(prev);
+          next.delete(baseId);
+          return next;
+        });
+        setDrawerBaseId((d) => (d === baseId ? null : d));
+        setRevisionHistoryFetched((prev) => {
+          const next = new Set(prev);
+          const g = group.find((x) => x.inquiryId);
+          if (g?.inquiryId) next.delete(g.inquiryId);
+          return next;
+        });
+        toast.success('Quotation group deleted');
+        setRefetchKey((k) => k + 1);
+      } catch (e: unknown) {
+        console.error(e);
+        toast.error(
+          e instanceof Error ? e.message : 'Failed to delete quotations',
+        );
+      }
+    },
+    [quotationRecords],
+  );
 
-  const quotations = data?.results ?? [];
-  const totalCount = data?.count ?? 0;
-  const totalPages = Math.ceil(totalCount / pageSize);
+  const latestRows = useMemo(
+    () => quotationRecords.filter((r) => r.isLatestRevision === true),
+    [quotationRecords],
+  );
 
-  const today = new Date().toLocaleDateString('en-IN', {
-    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
-  });
+  const stats = useMemo(() => {
+    const acceptedRows = latestRows.filter((r) => r.status === 'Accepted');
+    return {
+      total: latestRows.length,
+      sent: latestRows.filter((r) => r.status === 'Sent').length,
+      accepted: acceptedRows.length,
+      acceptedAmount: acceptedRows.reduce((sum, r) => sum + r.amount, 0),
+      declined: latestRows.filter((r) => r.status === 'Declined').length,
+    };
+  }, [latestRows]);
 
-  function handleViewPdf(q: Quotation) {
-    import('@/lib/auth').then(({ authStorage }) => {
-      const BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-      const slug = authStorage.getSlug() ?? '';
-      window.open(`${BASE}/api/app/${slug}/quotations/${q.id}/pdf/`, '_blank');
+  // Groups used by the client-card view (not yet rendered — wired in next step).
+  const clientGroups = useMemo(
+    () => groupQuotationsByClient(latestRows),
+    [latestRows],
+  );
+
+  const filteredGroups = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    return clientGroups.filter((g) => {
+      if (
+        needle &&
+        !g.client_name.toLowerCase().includes(needle) &&
+        !g.event_name.toLowerCase().includes(needle)
+      ) {
+        return false;
+      }
+      if (statusFilter !== 'All status' && g.latest_status !== statusFilter) return false;
+      return true;
     });
-  }
+  }, [clientGroups, search, statusFilter]);
 
-  function invalidate() {
+  // Suppress unused-variable warnings until the card view is wired in.
+  void filteredGroups;
+
+  const filtered = useMemo(
+    () =>
+      latestRows.filter((row) => {
+        if (!matchesSearchRow(row, search)) return false;
+        if (statusFilter !== 'All status' && row.status !== statusFilter) return false;
+        if (templateFilter !== 'All templates' && row.template !== templateFilter) return false;
+        return true;
+      }),
+    [latestRows, search, statusFilter, templateFilter],
+  );
+
+  const totalFiltered = filtered.length;
+  const totalPages = Math.max(1, Math.ceil(totalFiltered / pageSize));
+  const displayPage = Math.min(Math.max(page, 1), totalPages);
+
+  const pageRows = useMemo(() => {
+    const start = (displayPage - 1) * pageSize;
+    return filtered.slice(start, start + pageSize);
+  }, [filtered, displayPage, pageSize]);
+
+  const showingFrom = totalFiltered === 0 ? 0 : (displayPage - 1) * pageSize + 1;
+  const showingTo = Math.min(displayPage * pageSize, totalFiltered);
+
+  const paginationItems = buildPaginationItems(displayPage, totalPages);
+
+  const toggleRow = useCallback((id: string, checked: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
+
+  const allOnPageSelected =
+    pageRows.length > 0 && pageRows.every((r) => selectedIds.has(r.recordId));
+  const someOnPage = pageRows.some((r) => selectedIds.has(r.recordId));
+
+  const selectAllRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const el = selectAllRef.current;
+    if (!el || pageRows.length === 0) return;
+    el.indeterminate = someOnPage && !allOnPageSelected;
+  }, [someOnPage, allOnPageSelected, pageRows.length]);
+
+  const toggleSelectAllPage = () => {
+    const pageIds = pageRows.map((r) => r.recordId);
+    const allSel = pageIds.every((id) => selectedIds.has(id));
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (!allSel) pageIds.forEach((id) => next.add(id));
+      else pageIds.forEach((id) => next.delete(id));
+      return next;
+    });
+  };
+
+  const copyTxt = useCallback((t: string) => {
+    void navigator.clipboard.writeText(t).then(() => toast.success('Copied'));
+  }, []);
+
+  const invalidateQuotationsList = () => {
     queryClient.invalidateQueries({ queryKey: ['quotations'] });
-  }
+    setRefetchKey((k) => k + 1);
+  };
 
-  const showingFrom = totalCount === 0 ? 0 : (page - 1) * pageSize + 1;
-  const showingTo   = Math.min(page * pageSize, totalCount);
+  const drawerTimeline = useMemo(() => {
+    if (!drawerBaseId) return [];
+    return getRevisionsTimelineDesc(quotationRecords, drawerBaseId);
+  }, [drawerBaseId, quotationRecords]);
 
   return (
-    <div className="space-y-6">
-
-      {/* ── Page Header ─────────────────────────────────────────────────────── */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold" style={{ color: '#0F172A' }}>Quotations</h1>
-          <p className="text-sm mt-0.5" style={{ color: '#94A3B8' }}>{today}</p>
-        </div>
-        <button
-          onClick={() => setShowNewModal(true)}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white shrink-0 transition-opacity hover:opacity-90"
-          style={{ background: '#D97706' }}
+    <div className="min-h-0 space-y-4 font-sans" style={{ color: NAVY }}>
+      {fetchError && (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-3 text-[13px]"
+          style={{
+            borderColor: '#fecaca',
+            backgroundColor: '#fef2f2',
+            color: '#991b1b',
+          }}
         >
-          <Plus size={16} />
-          New Quotation
-        </button>
+          <span>Failed to load quotations. {fetchError}</span>
+          <button
+            type="button"
+            className="font-semibold underline decoration-red-800/50 underline-offset-2 hover:decoration-red-800"
+            onClick={() => setRefetchKey((k) => k + 1)}
+          >
+            Retry →
+          </button>
+        </div>
+      )}
+
+      {/* Header: breadcrumb + user / bell */}
+      <div className="flex flex-col gap-3">
+
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            className="inline-flex items-center gap-2 rounded-lg border bg-white px-3 py-2 font-medium"
+            style={{ borderColor: BORDER, color: NAVY, fontSize: 13 }}
+            onClick={() => toast('Import quotations (demo)')}
+          >
+            <ArrowDownToLine className="h-4 w-4 shrink-0" aria-hidden />
+            Import Quotations
+          </button>
+          <button
+            type="button"
+            className="inline-flex items-center gap-2 rounded-lg px-3 py-2 font-bold text-white"
+            style={{ backgroundColor: NAVY, fontSize: 13 }}
+            onClick={() => router.push(`/app/${slug}/quotations/create`)}
+          >
+            + Create Quotation
+          </button>
+        </div>
       </div>
 
-      {/* ── Filters ─────────────────────────────────────────────────────────── */}
-      <div
-        className="flex flex-wrap items-center gap-3 px-4 py-3 rounded-2xl"
-        style={{ background: '#fff', border: '1px solid #E2E8F0' }}
-      >
-        {/* Search */}
-        <div className="flex items-center gap-2 flex-1 min-w-48 px-3 py-2 rounded-lg" style={{ border: '1px solid #E2E8F0' }}>
-          <Search size={14} style={{ color: '#94A3B8', flexShrink: 0 }} />
-          <input
-            type="text"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Search client name, event..."
-            className="flex-1 text-sm outline-none bg-transparent"
-            style={{ color: '#0F172A' }}
-          />
+      {/* Stats */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {/* Total */}
+        <div style={{ background: 'var(--color-background-secondary)', borderRadius: 'var(--border-radius-md)', padding: '12px 14px' }}>
+          <p style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 500, color: '#737373', marginBottom: 6 }}>Total</p>
+          <p style={{ fontSize: 22, fontWeight: 500, color: NAVY, lineHeight: 1.2 }}>{stats.total}</p>
         </div>
 
-        {/* Date from */}
+        {/* Sent */}
+        <div style={{ background: 'var(--color-background-secondary)', borderRadius: 'var(--border-radius-md)', padding: '12px 14px' }}>
+          <p style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 500, color: '#737373', marginBottom: 6 }}>Sent</p>
+          <p style={{ fontSize: 22, fontWeight: 500, color: '#1565c0', lineHeight: 1.2 }}>{stats.sent}</p>
+        </div>
+
+        {/* Accepted */}
+        <div style={{ background: 'var(--color-background-secondary)', borderRadius: 'var(--border-radius-md)', padding: '12px 14px' }}>
+          <p style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 500, color: '#737373', marginBottom: 6 }}>Accepted</p>
+          <p style={{ fontSize: 22, fontWeight: 500, color: '#2e7d32', lineHeight: 1.2 }}>{stats.accepted}</p>
+          <p style={{ fontSize: 11, color: '#737373', marginTop: 3 }}>{rupee(stats.acceptedAmount)}</p>
+        </div>
+
+        {/* Declined */}
+        <div style={{ background: 'var(--color-background-secondary)', borderRadius: 'var(--border-radius-md)', padding: '12px 14px' }}>
+          <p style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 500, color: '#737373', marginBottom: 6 }}>Declined</p>
+          <p style={{ fontSize: 22, fontWeight: 500, color: '#c62828', lineHeight: 1.2 }}>{stats.declined}</p>
+        </div>
+      </div>
+
+      {/* Search & filters */}
+      <div className="flex flex-wrap items-center gap-2">
         <input
-          type="date"
-          value={dateFrom}
-          onChange={e => setDateFrom(e.target.value)}
-          className="px-3 py-2 rounded-lg text-sm outline-none"
-          style={{ border: '1px solid #E2E8F0', color: dateFrom ? '#0F172A' : '#94A3B8' }}
+          type="search"
+          placeholder="Search clients or events…"
+          value={search}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setPage(1);
+          }}
+          className="min-w-0 flex-1 outline-none"
+          style={{
+            padding: '8px 12px',
+            border: '0.5px solid var(--color-border-secondary)',
+            borderRadius: 'var(--border-radius-md)',
+            fontSize: 13,
+            background: 'var(--color-background-primary)',
+            color: NAVY,
+          }}
         />
-
-        <span className="text-sm" style={{ color: '#94A3B8' }}>to</span>
-
-        {/* Date to */}
-        <input
-          type="date"
-          value={dateTo}
-          onChange={e => setDateTo(e.target.value)}
-          className="px-3 py-2 rounded-lg text-sm outline-none"
-          style={{ border: '1px solid #E2E8F0', color: dateTo ? '#0F172A' : '#94A3B8' }}
-        />
-
-        {/* Status */}
         <select
           value={statusFilter}
-          onChange={e => setStatus(e.target.value)}
-          className="px-3 py-2 rounded-lg text-sm outline-none"
-          style={{ border: '1px solid #E2E8F0', color: '#0F172A', minWidth: 130 }}
+          onChange={(e) => {
+            setStatusFilter(e.target.value as typeof statusFilter);
+            setPage(1);
+          }}
+          style={{
+            padding: '8px 12px',
+            border: '0.5px solid var(--color-border-secondary)',
+            borderRadius: 'var(--border-radius-md)',
+            fontSize: 13,
+            background: 'var(--color-background-primary)',
+            color: NAVY,
+          }}
         >
-          {STATUSES.map(s => (
-            <option key={s} value={s}>{s === 'All' ? 'All Status' : s}</option>
+          <option value="All status">All status</option>
+          <option value="Sent">Sent</option>
+          <option value="Accepted">Accepted</option>
+          <option value="Draft">Draft</option>
+          <option value="Declined">Declined</option>
+        </select>
+        <select
+          value={templateFilter}
+          onChange={(e) => setTemplateFilter(e.target.value)}
+          style={{
+            padding: '8px 12px',
+            border: '0.5px solid var(--color-border-secondary)',
+            borderRadius: 'var(--border-radius-md)',
+            fontSize: 13,
+            background: 'var(--color-background-primary)',
+            color: NAVY,
+          }}
+        >
+          {TEMPLATE_NAMES.map((t) => (
+            <option key={t} value={t}>{t}</option>
           ))}
         </select>
-
-        {/* Export */}
-        <button
-          className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors"
-          style={{ border: '1px solid #E2E8F0', color: '#64748B' }}
-          onMouseEnter={e => { e.currentTarget.style.background = '#F1F5F9'; }}
-          onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
-        >
-          <Download size={14} />
-          Export
-        </button>
       </div>
 
-      {/* ── Table ───────────────────────────────────────────────────────────── */}
-      <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid #E2E8F0', background: '#fff' }}>
+      {/* Table */}
+      <div
+        className="overflow-hidden rounded-xl border bg-white"
+        style={{ borderColor: BORDER }}
+      >
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full min-w-[960px] border-collapse">
             <thead>
-              <tr style={{ borderBottom: '1px solid #E2E8F0', background: '#F8FAFC' }}>
-                {['# Quote No.', 'Client Name', 'Event Type', 'Event Date', 'Total Amount', 'Status', 'Created', 'Actions'].map(col => (
+              <tr style={{ backgroundColor: '#f9f9f9' }}>
+                <th className="w-11 border-b px-3 py-3 text-left" style={{ borderColor: BORDER }}>
+                  <input
+                    ref={selectAllRef}
+                    type="checkbox"
+                    checked={allOnPageSelected}
+                    onChange={toggleSelectAllPage}
+                    className="h-4 w-4 shrink-0 cursor-pointer accent-[#1a1a2e]"
+                    aria-label="Select all on page"
+                  />
+                </th>
+                {(
+                  ['Quotation No.', 'Client', 'Event', 'Event Date', 'Amount', 'Status', 'Created On', 'Actions'] as const
+                ).map((lab) => (
                   <th
-                    key={col}
-                    className="text-left px-5 py-3.5 text-xs font-semibold uppercase tracking-wide whitespace-nowrap"
-                    style={{ color: '#64748B' }}
+                    key={lab}
+                    className="border-b px-3 py-3 text-left text-[11px] font-bold uppercase tracking-wide"
+                    style={{
+                      borderColor: BORDER,
+                      color: '#737373',
+                      letterSpacing: '0.06em',
+                    }}
                   >
-                    {col}
+                    {lab}
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {isLoading && Array.from({ length: 6 }).map((_, i) => (
-                <tr key={i} style={{ borderBottom: '1px solid #F1F5F9' }}>
-                  {Array.from({ length: 8 }).map((__, j) => (
-                    <td key={j} className="px-5 py-4">
-                      <Skeleton className="h-4 rounded w-24" />
-                    </td>
-                  ))}
-                </tr>
-              ))}
-
-              {!isLoading && quotations.length === 0 && (
+              {loading ? (
+                Array.from({ length: 10 }).map((_, i) => (
+                  <QuotationTableSkeletonRow key={`sk-${i}`} zebra={i % 2 === 1} />
+                ))
+              ) : fetchError ? null : latestRows.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-5 py-16 text-center">
-                    <div className="flex flex-col items-center gap-3">
-                      <div className="w-12 h-12 rounded-full flex items-center justify-center" style={{ background: '#F1F5F9' }}>
-                        <FileText size={22} style={{ color: '#94A3B8' }} />
+                  <td className="border-0 p-0" colSpan={9}>
+                    <div className="flex flex-col items-center justify-center gap-4 px-6 py-16">
+                      <div
+                        className="flex h-24 w-24 items-center justify-center rounded-2xl border"
+                        style={{ borderColor: BORDER, backgroundColor: '#f9fafb' }}
+                      >
+                        <FileText className="h-12 w-12 text-[#9ca3af]" strokeWidth={1.25} aria-hidden />
                       </div>
-                      <p className="text-sm font-medium" style={{ color: '#64748B' }}>No quotations found</p>
-                      <p className="text-xs" style={{ color: '#94A3B8' }}>Create a new quotation to get started</p>
+                      <p className="text-[15px] font-semibold" style={{ color: NAVY }}>
+                        No quotations found
+                      </p>
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-2 rounded-lg px-4 py-2.5 font-bold text-white"
+                        style={{ backgroundColor: NAVY, fontSize: 13 }}
+                        onClick={() => router.push(`/app/${slug}/quotations/create`)}
+                      >
+                        + Create Quotation
+                      </button>
                     </div>
                   </td>
                 </tr>
+              ) : totalFiltered === 0 ? (
+                <tr>
+                  <td className="border-0 px-6 py-12 text-center text-[13px]" colSpan={9} style={{ color: '#737373' }}>
+                    No quotations match your filters.
+                  </td>
+                </tr>
+              ) : (
+              pageRows.map((row, idx) => {
+                const zebra = idx % 2 === 1;
+                const co = formatCreatedOn(row.createdISO);
+                const prevRevs = getPreviousRevisionsDesc(quotationRecords, row.baseId);
+                const hasHistory = getGroupRevisions(quotationRecords, row.baseId).length > 1;
+                const hasExpandableChevron =
+                  hasHistory || (row.inquiryId != null && row.inquiryId !== '');
+                const expanded = expandedBaseIds.has(row.baseId);
+                const viewHref = `/app/${slug}/quotations/${row.recordId}`;
+                return (
+                  <Fragment key={row.recordId}>
+                  <tr
+                    className="group cursor-default transition-colors"
+                    style={{
+                      backgroundColor: zebra ? '#fafafa' : '#fff',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = '#f0f7ff';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = zebra ? '#fafafa' : '#fff';
+                    }}
+                  >
+                    <td className="border-b px-3 py-3 align-middle" style={{ borderColor: BORDER }}>
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(row.recordId)}
+                        onChange={(e) => toggleRow(row.recordId, e.target.checked)}
+                        className="h-4 w-4 cursor-pointer accent-[#1a1a2e]"
+                        aria-label={`Select ${row.displayId}`}
+                      />
+                    </td>
+                    <td className="border-b px-3 py-3 align-middle" style={{ borderColor: BORDER }}>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <button
+                          type="button"
+                          className="text-[13px] font-semibold hover:underline"
+                          style={{ color: '#0d9488' }}
+                          onClick={() => router.push(viewHref)}
+                        >
+                          {row.displayId}
+                        </button>
+                        <button
+                          type="button"
+                          className="inline-flex shrink-0 text-[#9ca3af] hover:text-[#525252]"
+                          aria-label={`Copy ${row.displayId}`}
+                          onClick={() => copyTxt(row.displayId)}
+                        >
+                          <Copy className="h-3.5 w-3.5" />
+                        </button>
+                        {row.revisionNumber > 1 && (
+                          <span
+                            className="rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                            style={{ backgroundColor: '#fff8e1', color: '#f59e0b' }}
+                          >
+                            Rev {row.revisionNumber}
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          aria-expanded={expanded}
+                          aria-label={expanded ? 'Collapse revisions' : 'Expand revisions'}
+                          disabled={!hasExpandableChevron}
+                          className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[#737373] transition-colors hover:bg-black/[0.06] ${hasExpandableChevron ? '' : 'invisible pointer-events-none'}`}
+                          onClick={() => void handleExpansionToggle(row)}
+                        >
+                          <ChevronDown
+                            className={`h-4 w-4 transition-transform ${expanded ? '-rotate-180' : ''}`}
+                            aria-hidden
+                          />
+                        </button>
+                      </div>
+                    </td>
+                    <td className="border-b px-3 py-3 align-top" style={{ borderColor: BORDER }}>
+                      <p className="text-[13px] font-bold leading-snug" style={{ color: NAVY }}>
+                        {row.clientName}
+                      </p>
+                      <p className="text-[11px] leading-snug" style={{ color: '#737373' }}>
+                        {row.phone}
+                      </p>
+                    </td>
+                    <td
+                      className="border-b px-3 py-3 align-middle text-[13px]"
+                      style={{ borderColor: BORDER, color: NAVY }}
+                    >
+                      {row.event}
+                    </td>
+                    <td className="border-b px-3 py-3 align-middle" style={{ borderColor: BORDER }}>
+                      <span className="inline-flex items-center gap-1.5 text-[13px]" style={{ color: NAVY }}>
+                        <Calendar className="h-4 w-4 shrink-0 text-[#9ca3af]" aria-hidden />
+                        {formatEventDay(row.eventDateISO)}
+                      </span>
+                    </td>
+                    <td
+                      className="border-b px-3 py-3 align-middle text-[13px] font-bold"
+                      style={{ color: NAVY }}
+                    >
+                      {rupee(row.amount)}
+                    </td>
+                    <td className="border-b px-3 py-3 align-middle" style={{ borderColor: BORDER }}>
+                      {tableStatusBadge(row.status)}
+                    </td>
+                    <td className="border-b px-3 py-3 align-top" style={{ borderColor: BORDER }}>
+                      <p className="text-[13px] font-bold" style={{ color: NAVY }}>
+                        {co.date}
+                      </p>
+                      <p className="text-[11px]" style={{ color: '#737373' }}>
+                        {co.time}
+                      </p>
+                    </td>
+                    <td className="border-b px-3 py-2 align-middle" style={{ borderColor: BORDER }}>
+                      <div className="flex items-center gap-0.5">
+                        <button
+                          type="button"
+                          className="flex h-9 w-9 items-center justify-center rounded-md text-[#737373] transition-colors hover:bg-black/[0.04]"
+                          title="View"
+                          aria-label="View quotation"
+                          onClick={() => router.push(viewHref)}
+                        >
+                          <Eye className="h-[18px] w-[18px]" strokeWidth={1.85} />
+                        </button>
+                        <button
+                          type="button"
+                          className="flex h-9 w-9 items-center justify-center rounded-md text-[#737373] transition-colors hover:bg-black/[0.04]"
+                          title="Edit — creates new revision"
+                          aria-label="Edit quotation — new revision"
+                          onClick={() => void handleCreateRevisionApi(row.baseId)}
+                        >
+                          <PencilLine className="h-[18px] w-[18px]" strokeWidth={1.85} />
+                        </button>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger
+                            type="button"
+                            className="flex h-9 w-9 items-center justify-center rounded-md text-[#737373] outline-none transition-colors hover:bg-black/[0.04]"
+                            aria-label="More actions"
+                          >
+                            <MoreHorizontal className="h-[18px] w-[18px]" strokeWidth={2} />
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent
+                            align="end"
+                            sideOffset={4}
+                            className="min-w-[14rem] border border-[#e0e0e0] bg-white shadow-none"
+                          >
+                            <DropdownMenuItem className="gap-2" onClick={() => router.push(viewHref)}>
+                              <Eye className="h-4 w-4 shrink-0" aria-hidden />
+                              View
+                            </DropdownMenuItem>
+                            <DropdownMenuItem className="gap-2" onClick={() => void handleCreateRevisionApi(row.baseId)}>
+                              <PencilLine className="h-4 w-4 shrink-0" aria-hidden />
+                              Edit (new revision)
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              className="gap-2"
+                              onClick={() => {
+                                setDrawerBaseId(row.baseId);
+                                if (
+                                  row.inquiryId &&
+                                  !revisionHistoryFetched.has(row.inquiryId)
+                                ) {
+                                  void loadRevisionHistory(row.inquiryId)
+                                    .then(() => {
+                                      setRevisionHistoryFetched((s) =>
+                                        new Set(s).add(row.inquiryId!),
+                                      );
+                                    })
+                                    .catch((e) => {
+                                      console.error(e);
+                                      toast.error('Could not load revision history');
+                                    });
+                                }
+                              }}
+                            >
+                              <ClipboardList className="h-4 w-4 shrink-0" aria-hidden />
+                              View all revisions
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              variant="destructive"
+                              className="gap-2"
+                              onClick={() => void handleDeleteGroupApi(row.baseId)}
+                            >
+                              <Trash2 className="h-4 w-4 shrink-0" aria-hidden />
+                              Delete quotation group
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+                    </td>
+                  </tr>
+                  {expanded &&
+                    prevRevs.map((rev) => (
+                      <tr key={rev.recordId} style={{ backgroundColor: '#fafafa', color: '#737373' }}>
+                        <td className="border-b px-3 py-2 align-middle" style={{ borderColor: BORDER }} aria-hidden />
+                        <td className="border-b px-3 py-2 align-middle" style={{ borderColor: BORDER }} colSpan={8}>
+                          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 pl-6 text-[12px] md:pl-10">
+                            <span className="select-none text-[#9ca3af]" aria-hidden>
+                              └
+                            </span>
+                            <Link
+                              href={`/app/${slug}/quotations/${rev.recordId}`}
+                              className="font-semibold hover:underline"
+                              style={{ color: '#0f766e' }}
+                            >
+                              {rev.displayId}
+                            </Link>
+                            <span
+                              className="rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                              style={{ backgroundColor: '#fff8e1', color: '#f59e0b' }}
+                            >
+                              Rev {rev.revisionNumber}
+                            </span>
+                            {tableStatusBadge(rev.status)}
+                            <span>{shortDate(rev.createdISO)}</span>
+                            <span className="font-semibold" style={{ color: NAVY }}>
+                              {rupee(rev.amount)}
+                            </span>
+                            <button
+                              type="button"
+                              title="View"
+                              aria-label={`View ${rev.displayId}`}
+                              className="inline-flex items-center rounded-md p-1.5 text-[#737373] hover:bg-black/[0.06]"
+                              onClick={() => router.push(`/app/${slug}/quotations/${rev.recordId}`)}
+                            >
+                              <Eye className="h-[17px] w-[17px]" strokeWidth={1.85} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </Fragment>
+                );
+              })
               )}
-
-              {!isLoading && quotations.map((q, idx) => (
-                <tr
-                  key={q.id}
-                  style={{
-                    borderBottom: idx < quotations.length - 1 ? '1px solid #F1F5F9' : 'none',
-                    opacity: isFetching ? 0.6 : 1,
-                    transition: 'opacity 0.15s',
-                  }}
-                  className="hover:bg-slate-50 transition-colors"
-                >
-                  <td className="px-5 py-4 font-medium text-xs" style={{ color: '#64748B' }}>
-                    #{q.quote_number}
-                  </td>
-                  <td className="px-5 py-4 font-semibold" style={{ color: '#0F172A' }}>
-                    {q.client_name || '—'}
-                  </td>
-                  <td className="px-5 py-4" style={{ color: '#64748B' }}>
-                    {q.event_type || '—'}
-                  </td>
-                  <td className="px-5 py-4" style={{ color: '#64748B' }}>
-                    {fmtDate(q.event_date)}
-                  </td>
-                  <td className="px-5 py-4 font-semibold" style={{ color: '#0F172A' }}>
-                    {fmtAmount(q.total_amount)}
-                  </td>
-                  <td className="px-5 py-4">
-                    <StatusBadge status={q.status} />
-                  </td>
-                  <td className="px-5 py-4" style={{ color: '#94A3B8' }}>
-                    {fmtDate(q.created_at)}
-                  </td>
-                  <td className="px-5 py-4">
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => handleViewPdf(q)}
-                        title="View / Send PDF"
-                        className="p-1.5 rounded-lg transition-colors"
-                        onMouseEnter={e => { e.currentTarget.style.background = '#EFF6FF'; }}
-                        onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
-                      >
-                        <Mail size={15} style={{ color: '#64748B' }} />
-                      </button>
-                      <button
-                        onClick={() => setPricingQuotation(q)}
-                        title="Pricing"
-                        className="p-1.5 rounded-lg transition-colors"
-                        onMouseEnter={e => { e.currentTarget.style.background = '#F1F5F9'; }}
-                        onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
-                      >
-                        <Pencil size={15} style={{ color: '#64748B' }} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
             </tbody>
           </table>
         </div>
-
-        {/* ── Pagination ────────────────────────────────────────────────────── */}
-        {totalCount > 0 && (
-          <div
-            className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5"
-            style={{ borderTop: '1px solid #E2E8F0' }}
-          >
-            <p className="text-xs" style={{ color: '#64748B' }}>
-              Showing {showingFrom}–{showingTo} of {totalCount} quotations
-            </p>
-
-            <div className="flex items-center gap-3">
-              {/* Page size */}
-              <div className="flex items-center gap-1.5">
-                <select
-                  value={pageSize}
-                  onChange={e => { setPageSize(Number(e.target.value)); setPage(1); }}
-                  className="text-xs px-2 py-1 rounded-lg outline-none"
-                  style={{ border: '1px solid #E2E8F0', color: '#64748B' }}
-                >
-                  {PAGE_SIZES.map(s => <option key={s} value={s}>{s} / page</option>)}
-                </select>
-              </div>
-
-              {/* Prev / Next */}
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={() => setPage(p => Math.max(1, p - 1))}
-                  disabled={page === 1}
-                  className="w-7 h-7 flex items-center justify-center rounded-lg transition-colors"
-                  style={{
-                    border: '1px solid #E2E8F0',
-                    color: page === 1 ? '#CBD5E1' : '#64748B',
-                    cursor: page === 1 ? 'not-allowed' : 'pointer',
-                  }}
-                >
-                  <ChevronLeft size={14} />
-                </button>
-
-                {Array.from({ length: Math.min(totalPages, 5) }).map((_, i) => {
-                  const p = i + 1;
-                  return (
-                    <button
-                      key={p}
-                      onClick={() => setPage(p)}
-                      className="w-7 h-7 flex items-center justify-center rounded-lg text-xs font-medium transition-colors"
-                      style={{
-                        border: '1px solid #E2E8F0',
-                        background: page === p ? '#0F172A' : 'transparent',
-                        color: page === p ? '#fff' : '#64748B',
-                      }}
-                    >
-                      {p}
-                    </button>
-                  );
-                })}
-
-                <button
-                  onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                  disabled={page === totalPages || totalPages === 0}
-                  className="w-7 h-7 flex items-center justify-center rounded-lg transition-colors"
-                  style={{
-                    border: '1px solid #E2E8F0',
-                    color: (page === totalPages || totalPages === 0) ? '#CBD5E1' : '#64748B',
-                    cursor: (page === totalPages || totalPages === 0) ? 'not-allowed' : 'pointer',
-                  }}
-                >
-                  <ChevronRight size={14} />
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
 
-      {/* ── Modals ──────────────────────────────────────────────────────────── */}
+      {/* Pagination */}
+      <div
+        className="flex flex-col gap-4 rounded-xl border bg-white px-4 py-3 lg:flex-row lg:items-center lg:justify-between"
+        style={{ borderColor: BORDER }}
+      >
+        <p className="text-center text-[12px] lg:text-left" style={{ color: '#737373' }}>
+          Showing {showingFrom} to {showingTo} of {totalFiltered} results
+        </p>
+
+        <div className="flex justify-center lg:flex-1 lg:justify-center">
+          <label className="inline-flex cursor-pointer items-center gap-2 text-[13px]" style={{ color: '#737373' }}>
+            Rows per page
+            <select
+              value={pageSize}
+              onChange={(e) => {
+                setPageSize(Number(e.target.value));
+                setPage(1);
+              }}
+              className="rounded-lg border bg-white px-2 py-1.5"
+              style={{ borderColor: BORDER, color: NAVY }}
+            >
+              {PAGE_SIZES.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <nav className="flex flex-wrap items-center justify-center gap-1 lg:justify-end" aria-label="Pagination">
+          <button
+            type="button"
+            onClick={() => setPage(displayPage - 1)}
+            disabled={displayPage <= 1}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-lg border disabled:pointer-events-none"
+            style={{
+              borderColor: BORDER,
+              color: displayPage <= 1 ? '#d1d5db' : '#737373',
+            }}
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+
+          {paginationItems.map((item, i) =>
+            item === 'ellipsis'
+              ? (
+                  <span key={`e-${i}`} className="px-2 text-[13px]" style={{ color: '#737373' }}>
+                  …
+                </span>
+                )
+              : (
+                  <button
+                    key={item}
+                    type="button"
+                    onClick={() => setPage(item)}
+                    className="inline-flex h-9 min-w-[36px] items-center justify-center rounded-full border text-[13px] font-semibold transition-colors"
+                    style={
+                      displayPage === item
+                        ? {
+                            borderColor: NAVY,
+                            backgroundColor: NAVY,
+                            color: '#fff',
+                          }
+                        : {
+                            borderColor: BORDER,
+                            backgroundColor: '#fff',
+                            color: NAVY,
+                          }
+                    }
+                  >
+                    {item}
+                  </button>
+                ),
+          )}
+
+          <button
+            type="button"
+            onClick={() => setPage(displayPage + 1)}
+            disabled={displayPage >= totalPages}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-lg border disabled:pointer-events-none"
+            style={{
+              borderColor: BORDER,
+              color: displayPage >= totalPages ? '#d1d5db' : '#737373',
+            }}
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </nav>
+      </div>
+
+      {drawerBaseId !== null && (
+        <>
+          <button
+            type="button"
+            className="fixed inset-0 z-40 cursor-default bg-black/25"
+            aria-label="Close revisions panel"
+            tabIndex={-1}
+            onClick={() => setDrawerBaseId(null)}
+          />
+          <aside
+            className="fixed inset-y-0 right-0 z-50 flex h-full w-full max-w-[400px] flex-col bg-white"
+            style={{ borderLeft: `1px solid ${BORDER}`, boxShadow: 'none' }}
+          >
+            <header
+              className="flex shrink-0 items-center justify-between gap-3 border-b px-4 py-3"
+              style={{ borderColor: BORDER }}
+            >
+              <h2 className="truncate text-base font-bold" style={{ color: NAVY }}>
+                {drawerTimeline[0]?.clientName ?? 'Revisions'}
+              </h2>
+              <button
+                type="button"
+                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[#737373] hover:bg-[#f5f5f5]"
+                aria-label="Close"
+                onClick={() => setDrawerBaseId(null)}
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </header>
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+              <ul className="space-y-0">
+                {drawerTimeline.map((rev) => {
+                  const cur = rev.isLatestRevision;
+                  return (
+                    <li
+                      key={rev.recordId}
+                      className="flex gap-3 border-b pb-4 pt-4 first:pt-1 last:border-0"
+                      style={{ borderColor: BORDER }}
+                    >
+                      <div
+                        className="mt-1.5 h-3 w-3 shrink-0 rounded-full"
+                        style={
+                          cur
+                            ? { backgroundColor: '#16a34a' }
+                            : {
+                                borderWidth: 2,
+                                borderStyle: 'solid',
+                                borderColor: '#d4d4d4',
+                                backgroundColor: '#fff',
+                              }
+                        }
+                        aria-hidden
+                      />
+                      <div className="min-w-0 flex-1 space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-[13px] font-semibold" style={{ color: NAVY }}>
+                            Rev {rev.revisionNumber}
+                          </span>
+                          {cur && (
+                            <span
+                              className="rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide"
+                              style={{ backgroundColor: '#e8f5e9', color: '#2e7d32' }}
+                            >
+                              Current
+                            </span>
+                          )}
+                          <span className="font-mono text-[12px] text-[#525252]">{rev.displayId}</span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-1.5 text-[13px] text-[#737373]">
+                          {tableStatusBadge(rev.status)}
+                          <span aria-hidden className="text-[#d4d4d4]">
+                            •
+                          </span>
+                          <span>{rupee(rev.amount)}</span>
+                          <span aria-hidden className="text-[#d4d4d4]">
+                            •
+                          </span>
+                          <span>{shortDate(rev.createdISO)}</span>
+                        </div>
+                        <button
+                          type="button"
+                          className="inline-flex items-center justify-center rounded-lg border px-3 py-1.5 text-[13px] font-semibold"
+                          style={{ borderColor: BORDER, color: NAVY }}
+                          onClick={() => {
+                            router.push(`/app/${slug}/quotations/${rev.recordId}`);
+                            setDrawerBaseId(null);
+                          }}
+                        >
+                          View
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          </aside>
+        </>
+      )}
+
       {showNewModal && (
         <NewQuotationModal
           onClose={() => setShowNewModal(false)}
-          onCreated={invalidate}
-        />
-      )}
-      {pricingQuotation && (
-        <PricingPanel
-          quotation={pricingQuotation}
-          onClose={() => setPricingQuotation(null)}
-          onSaved={invalidate}
+          onCreated={invalidateQuotationsList}
         />
       )}
     </div>

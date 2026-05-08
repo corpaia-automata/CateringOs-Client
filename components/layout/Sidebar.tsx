@@ -2,33 +2,44 @@
 
 import { useEffect } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   LayoutDashboard,
   Users,
   Calendar,
+  ContactRound,
   UtensilsCrossed,
-  ShoppingBasket,
   FileText,
-  CreditCard,
+  PieChart,
   Settings,
   LogOut,
   ChevronLeft,
   ChevronRight,
+  LifeBuoy,
 } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { authStorage } from '@/lib/auth';
 import { useTenant } from '@/contexts/TenantContext';
+import {
+  COS_BORDER,
+  COS_CANVAS,
+  COS_FOREST,
+  COS_FOREST_MID,
+  COS_GOLD_LIGHT,
+} from '@/lib/cosTheme';
 
-const NAV_PATHS = [
-  { label: 'Dashboard',  path: 'dashboard', icon: LayoutDashboard },
-  { label: 'Leads',      path: 'leads',      icon: Users },
-  { label: 'Events',     path: 'events',     icon: Calendar },
-  { label: 'Menu',       path: 'master',     icon: UtensilsCrossed },
-  { label: 'Grocery',    path: 'grocery',    icon: ShoppingBasket },
-  { label: 'Quotations', path: 'quotations', icon: FileText },
-  { label: 'Payments',   path: 'payments',   icon: CreditCard },
-  // { label: 'Reports',    path: 'reports',    icon: BarChart3 },
-  { label: 'Settings',   path: 'settings',   icon: Settings },
+type NavItem = { label: string; path: string; icon: typeof LayoutDashboard };
+
+const NAV_PATHS: NavItem[] = [
+  { label: 'Dashboard', path: 'dashboard', icon: LayoutDashboard },
+  { label: 'Leads', path: 'leads', icon: Users },
+  { label: 'Events', path: 'events', icon: Calendar },
+  // { label: 'Contacts', path: 'leads', icon: ContactRound },
+  { label: 'Menus', path: 'master', icon: UtensilsCrossed },
+  // { label: 'Quotations', path: 'quotations', icon: FileText },
+  // { label: 'Reports', path: 'dashboard', icon: PieChart },
+  { label: 'Settings', path: 'settings', icon: Settings },
 ];
 
 type SidebarProps = {
@@ -40,11 +51,14 @@ type SidebarProps = {
 
 export default function Sidebar({ isOpen, isCollapsed, onClose, onToggle }: SidebarProps) {
   const pathname = usePathname();
-  const router   = useRouter();
+  const router = useRouter();
   const { tenantSlug } = useTenant();
+
   useEffect(() => {
     document.body.style.overflow = isOpen ? 'hidden' : '';
-    return () => { document.body.style.overflow = ''; };
+    return () => {
+      document.body.style.overflow = '';
+    };
   }, [isOpen]);
 
   const slug = tenantSlug ?? '';
@@ -53,6 +67,7 @@ export default function Sidebar({ isOpen, isCollapsed, onClose, onToggle }: Side
     label,
     href: `${base}/${path}`,
     icon,
+    pathKey: path,
   }));
 
   function handleLogout() {
@@ -60,16 +75,18 @@ export default function Sidebar({ isOpen, isCollapsed, onClose, onToggle }: Side
     router.push('/login');
   }
 
-  function isActive(href: string) {
-    const dashboardHref = `${base}/dashboard`;
-    if (href === dashboardHref) return pathname === dashboardHref;
-    return pathname.startsWith(href);
+  function isActive(href: string, pathKey: string) {
+    const segments = (pathname ?? '').split('/').filter(Boolean);
+    const currentSection = segments[0] === 'app' ? segments[2] : segments[0];
+    if (pathKey === 'leads' && currentSection === 'leads') return true;
+    if (pathKey === 'events' && currentSection === 'events') return true;
+    return currentSection === pathKey;
   }
 
-  const sidebarWidth = isCollapsed ? 72 : 240;
+  const sidebarWidth = isCollapsed ? 84 : 268;
 
-  function NavItem({ label, href, icon: Icon }: typeof NAV_ITEMS[0]) {
-    const active = isActive(href);
+  function NavItemRow({ label, href, icon: Icon, pathKey }: (typeof NAV_ITEMS)[0]) {
+    const active = isActive(href, pathKey);
     return (
       <li>
         <Link
@@ -78,24 +95,29 @@ export default function Sidebar({ isOpen, isCollapsed, onClose, onToggle }: Side
           title={isCollapsed ? label : undefined}
           className="flex items-center rounded-lg transition-all duration-150 select-none"
           style={{
-            gap:            isCollapsed ? 0 : 10,
-            padding:        isCollapsed ? '9px 0' : '9px 12px',
+            gap: isCollapsed ? 0 : 10,
+            padding: isCollapsed ? '10px 0' : '10px 12px',
             justifyContent: isCollapsed ? 'center' : 'flex-start',
-            color:          active ? '#ffffff' : '#64748b',
-            background:     active ? '#16a34a' : 'transparent',
-            fontWeight:     active ? 600 : 500,
-            fontSize:       16,
+            color: active ? '#fff' : '#3d524a',
+            background: active ? 'black' : 'transparent',
+            fontWeight: active ? 600 : 500,
+            fontSize: 14,
+            boxShadow: active ? '0 2px 8px rgba(19,78,58,0.25)' : 'none',
           }}
-          onMouseEnter={e => {
-            if (!active) e.currentTarget.style.background = '#f1f5f9';
+          onMouseEnter={(e) => {
+            if (!active) e.currentTarget.style.background = COS_CANVAS;
           }}
-          onMouseLeave={e => {
+          onMouseLeave={(e) => {
             if (!active) e.currentTarget.style.background = 'transparent';
           }}
         >
           <Icon
-            size={18}
-            style={{ flexShrink: 0, color: active ? '#ffffff' : '#94a3b8' }}
+            size={19}
+            strokeWidth={2}
+            style={{
+              flexShrink: 0,
+              color: active ? COS_GOLD_LIGHT : '#5c7168',
+            }}
           />
           {!isCollapsed && <span>{label}</span>}
         </Link>
@@ -105,135 +127,144 @@ export default function Sidebar({ isOpen, isCollapsed, onClose, onToggle }: Side
 
   return (
     <>
-      {/* Mobile overlay */}
       <div
         aria-hidden="true"
-        className={`fixed inset-0 z-30 bg-black/40 backdrop-blur-sm transition-all duration-300  md:hidden ${
-          isOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+        className={`fixed inset-0 z-30 bg-black/40 backdrop-blur-sm transition-all duration-300 md:hidden ${
+          isOpen ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'
         }`}
         onClick={onClose}
       />
 
-      {/* Sidebar */}
       <aside
         className={`
-          fixed left-0 top-0 h-screen flex flex-col z-40 select-none shadow-2xl transition-all duration-300
+          fixed left-0 top-0 z-40 flex h-screen select-none flex-col shadow-xl transition-all duration-300
           ${isOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
         `}
         style={{
-          width:       sidebarWidth,
-          background:  '#ffffff',
-          borderRight: '1px solid #e2e8f0',
+          width: sidebarWidth,
+          background: '#fbfcfb',
+          borderRight: `1px solid ${COS_BORDER}`,
         }}
       >
-        {/* Logo */}
+        {/* Brand */}
         <div
-          className="flex items-center shrink-0 transition-all duration-300"
+          className="flex w-full shrink-0 items-center transition-all duration-300"
           style={{
-            padding:        isCollapsed ? '20px 0' : '20px 18px',
+            padding: isCollapsed ? '20px 0' : '20px 16px',
             justifyContent: isCollapsed ? 'center' : 'flex-start',
           }}
         >
-          <div className="flex items-center gap-3">
-            {/* Green "A" square */}
-            <div
-              className="flex items-center justify-center rounded-xl shrink-0 font-bold text-white"
-              style={{
-                width:      38,
-                height:     38,
-                background: '#16a34a',
-                fontSize:   18,
-              }}
-            >
-              C
-            </div>
-            {!isCollapsed && (
-              <span style={{ fontSize: 15, fontWeight: 700, color: '#111827', letterSpacing: '-0.01em' }}>
-                CateringOS
-              </span>
-            )}
+          <div
+            className="relative overflow-hidden rounded-xl"
+            style={{
+              height: isCollapsed ? 44 : 52,
+              width: isCollapsed ? 44 : '100%',
+            }}
+          >
+            <img
+              src="/logos/main.png"
+              alt="CateringOS"
+              className="h-full w-full object-contain"
+            />
           </div>
         </div>
 
-        {/* Desktop collapse/expand toggle */}
         <button
           onClick={onToggle}
           aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          className="hidden md:flex items-center justify-center transition-all duration-150"
+          className="absolute right-[-12px] top-[84px] z-50 hidden h-7 w-7 items-center justify-center rounded-full border transition-all duration-150 md:flex"
           style={{
-            position:     'absolute',
-            top:          72,
-            right:        -12,
-            width:        24,
-            height:       24,
-            borderRadius: '50%',
-            background:   '#ffffff',
-            border:       '1px solid #e2e8f0',
-            color:        '#94a3b8',
-            zIndex:       50,
-            boxShadow:    '0 2px 6px rgba(0,0,0,0.1)',
-            cursor:       'pointer',
+            background: '#fff',
+            borderColor: COS_BORDER,
+            color: '#6b7f76',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
           }}
-          onMouseEnter={e => {
-            e.currentTarget.style.background  = '#16a34a';
-            e.currentTarget.style.color       = '#fff';
-            e.currentTarget.style.borderColor = '#16a34a';
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = COS_FOREST;
+            e.currentTarget.style.color = '#fff';
+            e.currentTarget.style.borderColor = COS_FOREST;
           }}
-          onMouseLeave={e => {
-            e.currentTarget.style.background  = '#ffffff';
-            e.currentTarget.style.color       = '#94a3b8';
-            e.currentTarget.style.borderColor = '#e2e8f0';
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = '#fff';
+            e.currentTarget.style.color = '#6b7f76';
+            e.currentTarget.style.borderColor = COS_BORDER;
           }}
         >
-          {isCollapsed ? <ChevronRight size={13} /> : <ChevronLeft size={13} />}
+          {isCollapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
         </button>
 
-        {/* Divider */}
-        <div style={{ height: 1, background: '#e2e8f0', flexShrink: 0 }} />
+        <div style={{ height: 1, background: COS_BORDER, flexShrink: 0 }} />
 
-        {/* Navigation */}
         <nav
-          className="flex-1 overflow-y-auto py-3"
+          className="min-h-0 flex-1 overflow-y-auto py-3"
           style={{ padding: isCollapsed ? '12px 8px' : '12px 12px' }}
         >
           <ul className="space-y-0.5">
-            {NAV_ITEMS.map(item => <NavItem key={item.href} {...item} />)}
+            {NAV_ITEMS.map((item) => (
+              <NavItemRow key={`${item.href}-${item.label}`} {...item} />
+            ))}
           </ul>
         </nav>
+{/* 
+        {!isCollapsed && (
+          <div className="shrink-0 px-3 pb-3">
+            <div
+              className="rounded-xl px-4 py-4"
+              style={{
+                background: `linear-gradient(180deg, ${COS_CANVAS} 0%, #dce5e0 100%)`,
+                border: `1px solid ${COS_BORDER}`,
+              }}
+            >
+              <div className="mb-3 flex items-center gap-2">
+                <LifeBuoy size={18} style={{ color: COS_FOREST }} />
+                <p className="text-[13px] font-semibold" style={{ color: COS_FOREST }}>
+                  Need help?
+                </p>
+              </div>
+              <p className="mb-3 text-[12px] leading-snug" style={{ color: '#5c6d66' }}>
+                Our team can help with quotations, events, and billing.
+              </p>
+              <button
+                type="button"
+                className="w-full rounded-lg py-2.5 text-[12px] font-bold text-white transition-opacity hover:opacity-95"
+                style={{ background: COS_FOREST }}
+                onClick={() => toast('Support will reach you shortly')}
+              >
+                Contact support
+              </button>
+            </div>
+          </div>
+        )} */}
 
-        {/* Divider */}
-        <div style={{ height: 1, background: '#e2e8f0', flexShrink: 0 }} />
+        <div style={{ height: 1, background: COS_BORDER, flexShrink: 0 }} />
 
-        {/* Sign out */}
         <div
-          className="shrink-0 flex py-3 "
+          className="flex shrink-0 py-3"
           style={{
-            padding:        isCollapsed ? '12px 0' : '12px 16px',
+            padding: isCollapsed ? '12px 0' : '12px 14px',
             justifyContent: isCollapsed ? 'center' : 'flex-start',
           }}
         >
           <button
             onClick={handleLogout}
             title="Sign out"
-            className="flex items-center w-full gap-2 rounded-lg transition-all duration-150 font-medium"
+            className="flex w-full items-center gap-2 rounded-lg font-medium transition-all duration-150"
             style={{
-              padding:   isCollapsed ? '8px 0' : '8px 10px',
-              fontSize:  13,
-              color:     '#94a3b8',
-              width:     isCollapsed ? 36 : undefined,
-              height:    isCollapsed ? 36 : undefined,
+              padding: isCollapsed ? '10px 0' : '10px 12px',
+              fontSize: 13,
+              color: '#6b7f76',
               justifyContent: isCollapsed ? 'center' : 'flex-start',
             }}
-            onMouseEnter={e => {
-              e.currentTarget.style.background = '#fee2e2';
-              e.currentTarget.style.color      = '#ef4444';
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = '#fde8e8';
+              e.currentTarget.style.color = '#dc2626';
             }}
-            onMouseLeave={e => {
+            onMouseLeave={(e) => {
               e.currentTarget.style.background = 'transparent';
-              e.currentTarget.style.color      = '#94a3b8';
+              e.currentTarget.style.color = '#6b7f76';
             }}
           >
-            <LogOut size={16} />
+            <LogOut size={17} />
             {!isCollapsed && 'Sign out'}
           </button>
         </div>

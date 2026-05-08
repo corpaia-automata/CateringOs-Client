@@ -2,7 +2,6 @@
 
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Skeleton } from '@/components/ui/skeleton';
 import CreateDishForm, { DishApiResponse } from '../../../CreateDishForm';
@@ -22,39 +21,11 @@ export default function EditDishPage() {
   });
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: 'white' }}>
-
-      {/* ── Sticky header ─────────────────────────────────────────────── */}
-      <div
-        className="sticky top-0 z-10 px-6 py-4"
-        style={{ backgroundColor: '#fff', borderBottom: '1px solid #F1F5F9' }}
-      >
-        <div className="max-w-2xl mx-auto flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => router.push(listPath)}
-            className="p-1.5 rounded-lg transition-colors hover:bg-slate-100"
-            title="Back to dishes"
-          >
-            <ArrowLeft size={18} style={{ color: '#64748B' }} />
-          </button>
-          <div>
-            <h1 className="text-base font-semibold" style={{ color: '#0F172A' }}>
-              {isLoading ? 'Loading…' : dish ? `Edit — ${dish.name}` : 'Edit Dish'}
-            </h1>
-            <p className="text-xs" style={{ color: '#94A3B8' }}>
-              Update dish details and ingredients
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* ── Body ──────────────────────────────────────────────────────── */}
-      <div className="px-6 py-6">
+    <div className="min-h-screen font-sans" style={{ backgroundColor: '#fafafa' }}>
 
         {/* Loading skeleton — mirrors the form's section layout */}
         {isLoading && (
-          <div className="max-w-2xl mx-auto space-y-7">
+          <div className="mx-auto max-w-7xl space-y-7 px-6 py-8">
             {/* Dish type cards */}
             <div className="grid grid-cols-3 gap-3">
               {[0, 1, 2].map(i => (
@@ -89,7 +60,7 @@ export default function EditDishPage() {
 
         {/* Error state */}
         {isError && (
-          <div className="max-w-2xl mx-auto flex flex-col items-center justify-center py-20 text-center">
+          <div className="mx-auto flex max-w-7xl flex-col items-center justify-center px-6 py-20 text-center">
             <p className="text-sm font-medium" style={{ color: '#0F172A' }}>
               Could not load dish
             </p>
@@ -111,7 +82,6 @@ export default function EditDishPage() {
         {dish && (
           <CreateDishForm initialData={dish} dishId={id} />
         )}
-      </div>
     </div>
   );
 }

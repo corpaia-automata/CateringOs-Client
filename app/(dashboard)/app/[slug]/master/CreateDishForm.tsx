@@ -2,9 +2,20 @@
 
 import { useState, useMemo, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { Plus, Trash2, ChefHat, Flame, Tag, Loader2 } from 'lucide-react';
+import {
+  Plus,
+  Trash2,
+  ChefHat,
+  Zap,
+  Package,
+  Loader2,
+  ChevronDown,
+  Save,
+  ArrowLeft,
+} from 'lucide-react';
 import { api } from '@/lib/api';
 import toast from 'react-hot-toast';
+import { cn } from '@/lib/utils';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -42,7 +53,7 @@ export interface DishApiResponse {
   unit_type: string;
   description: string;
   price_unit: string;
-  base_price: string;       // DRF serialises Decimal as string
+  base_price: string;
   selling_price: string;
   labour_cost: string;
   image_url: string;
@@ -55,7 +66,6 @@ export interface DishApiResponse {
   }>;
 }
 
-// Map API response → internal form state (strips ingredient IDs, fills defaults)
 function dataToForm(d: DishApiResponse): DishFormState {
   return {
     dish_type:     d.dish_type     ?? '',
@@ -80,18 +90,38 @@ function dataToForm(d: DishApiResponse): DishFormState {
 // ── Props ──────────────────────────────────────────────────────────────────────
 
 interface Props {
-  initialData?: DishApiResponse;  // present → edit mode
-  dishId?: string;                // present → PUT instead of POST
-  onSuccess?: () => void;         // present → modal mode: called after save instead of routing
-  onCancel?: () => void;          // present → modal mode: called when Cancel is clicked
+  initialData?: DishApiResponse;
+  dishId?: string;
+  onSuccess?: () => void;
+  onCancel?: () => void;
 }
 
-// ── Constants ──────────────────────────────────────────────────────────────────
+// ── Design tokens (aligned with Create Lead / enquiries flow) ──────────────────
+
+const NAVY = '#1a1a2e';
+const BORDER = '#e0e0e0';
+const MUTED_BG = '#f0f0f0';
+const RED = '#e53935';
 
 const DISH_TYPES = [
-  { value: 'recipe',       label: 'Recipe Dish',  Icon: ChefHat, desc: 'Made from a defined recipe' },
-  { value: 'live_counter', label: 'Live Counter',  Icon: Flame,   desc: 'Prepared live at the event' },
-  { value: 'fixed_price',  label: 'Fixed Price',   Icon: Tag,     desc: 'Flat rate, no recipe needed' },
+  {
+    value: 'recipe',
+    label: 'Recipe Dish',
+    Icon: ChefHat,
+    desc: 'Has ingredients with quantities. Cost is auto-calculated from ingredient prices + labour.',
+  },
+  {
+    value: 'live_counter',
+    label: 'Live Counter',
+    Icon: Zap,
+    desc: 'Live station (e.g. juice counter). No fixed price — price is entered per enquiry.',
+  },
+  {
+    value: 'fixed_price',
+    label: 'Fixed Price',
+    Icon: Package,
+    desc: 'Readymade / packaged item (e.g. water bottle). Has a fixed selling price, no recipe.',
+  },
 ] as const;
 
 const PRICE_UNITS = [
@@ -102,32 +132,6 @@ const PRICE_UNITS = [
 
 const UNIT_OPTIONS = ['kg', 'g', 'litre', 'ml', 'piece', 'packet', 'box'];
 
-// ── Style helpers (match existing codebase conventions) ────────────────────────
-
-const inp = 'w-full px-3 py-2 rounded-lg text-sm outline-none transition-colors';
-const ist     = { border: '1.5px solid #E2E8F0', backgroundColor: '#F8FAFC' } as const;
-const ist_err = { border: '1.5px solid #DC2626', backgroundColor: '#FFF5F5' } as const;
-const lbl = 'block text-xs font-medium mb-1.5 text-[#374151]';
-
-function FieldError({ msg }: { msg?: string }) {
-  if (!msg) return null;
-  return <p className="mt-1 text-xs" style={{ color: '#DC2626' }}>{msg}</p>;
-}
-
-function SectionTitle({ children }: { children: React.ReactNode }) {
-  return (
-    <h3 className="text-sm font-semibold mb-3" style={{ color: '#0F172A' }}>
-      {children}
-    </h3>
-  );
-}
-
-// ── Default state ──────────────────────────────────────────────────────────────
-
-const BLANK_INGREDIENT: IngredientRow = {
-  ingredient_name: '', quantity: '', unit: 'kg', price_per_unit: '',
-};
-
 const UNIT_TYPES = [
   { value: 'PLATE',   label: 'Plate' },
   { value: 'KG',      label: 'Kilogram' },
@@ -136,21 +140,113 @@ const UNIT_TYPES = [
   { value: 'PORTION', label: 'Portion' },
 ];
 
-const INITIAL: DishFormState = {
-  dish_type: '', name: '', category: '', veg_non_veg: 'veg',
-  unit_type: '', description: '', price_unit: 'per_plate', base_price: '',
-  selling_price: '', labour_cost: '', image_url: '', ingredients: [],
+const BLANK_INGREDIENT: IngredientRow = {
+  ingredient_name: '', quantity: '', unit: 'kg', price_per_unit: '',
 };
 
-// ── Component ─────────────────────────────────────────────────────────────────
+const INITIAL: DishFormState = {
+  dish_type: 'recipe',
+  name: '',
+  category: '',
+  veg_non_veg: 'veg',
+  unit_type: '',
+  description: '',
+  price_unit: 'per_plate',
+  base_price: '',
+  selling_price: '',
+  labour_cost: '',
+  image_url: '',
+  ingredients: [],
+};
+
+const pill =
+  'w-full rounded-[9999px] border bg-white px-4 py-3 text-[13px] text-[#1a1a2e] outline-none transition-colors placeholder:text-neutral-400 focus:border-[#1a1a2e] cursor-pointer';
+const roundedBox =
+  'w-full rounded-xl border bg-white px-4 py-3 text-[13px] text-[#1a1a2e] outline-none transition-colors placeholder:text-neutral-400 focus:border-[#1a1a2e]';
+
+function FieldError({ msg }: { msg?: string }) {
+  if (!msg) return null;
+  return <p className="mt-1 text-xs" style={{ color: RED }}>{msg}</p>;
+}
+
+function FieldLabel({
+  htmlFor,
+  children,
+  required,
+}: {
+  htmlFor?: string;
+  children: React.ReactNode;
+  required?: boolean;
+}) {
+  return (
+    <label
+      htmlFor={htmlFor}
+      className="mb-2 block cursor-pointer text-[13px] text-neutral-600"
+    >
+      {children}
+      {required ? <span style={{ color: RED }}> *</span> : null}
+    </label>
+  );
+}
+
+function SectionCard({
+  title,
+  action,
+  children,
+}: {
+  title: React.ReactNode;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <section
+      className="bg-white p-6 md:p-8 font-sans"
+      style={{ border: `1px solid ${BORDER}`, borderRadius: '12px' }}
+    >
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-[18px] font-bold leading-tight" style={{ color: NAVY }}>
+          {title}
+        </h2>
+        {action}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function SelectPill({
+  error,
+  className,
+  children,
+  ...rest
+}: React.SelectHTMLAttributes<HTMLSelectElement> & { error?: boolean }) {
+  return (
+    <div className="relative">
+      <select
+        className={cn(pill, 'appearance-none pr-10', className)}
+        style={{ borderColor: error ? RED : BORDER }}
+        {...rest}
+      >
+        {children}
+      </select>
+      <ChevronDown
+        size={16}
+        className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 opacity-60"
+        style={{ color: NAVY }}
+        aria-hidden
+      />
+    </div>
+  );
+}
 
 export default function CreateDishForm({ initialData, dishId, onSuccess, onCancel }: Props = {}) {
   const router = useRouter();
-  const { slug } = useParams<{ slug: string }>();
+  const params = useParams();
+  const slug = typeof params?.slug === 'string' ? params.slug : '';
   const listPath = `/app/${slug}/master`;
 
   const [form, setForm] = useState<DishFormState>(() =>
-    initialData ? dataToForm(initialData) : INITIAL
+    initialData ? dataToForm(initialData) : INITIAL,
   );
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
@@ -164,14 +260,10 @@ export default function CreateDishForm({ initialData, dishId, onSuccess, onCance
       .catch(() => {});
   }, []);
 
-  // ── Field helpers ──────────────────────────────────────────────────────────
-
   function set<K extends keyof DishFormState>(key: K, value: DishFormState[K]) {
     setForm(f => ({ ...f, [key]: value }));
     setErrors(e => ({ ...e, [key]: '' }));
   }
-
-  // ── Ingredient row helpers ─────────────────────────────────────────────────
 
   function addIngredient() {
     setForm(f => ({ ...f, ingredients: [...f.ingredients, { ...BLANK_INGREDIENT }] }));
@@ -189,8 +281,6 @@ export default function CreateDishForm({ initialData, dishId, onSuccess, onCance
     });
   }
 
-  // ── Cost calculation ──────────────────────────────────────────────────────
-
   const ingredientCost = useMemo(() =>
     form.ingredients.reduce((sum, r) => {
       return sum + (parseFloat(r.quantity) || 0) * (parseFloat(r.price_per_unit) || 0);
@@ -198,25 +288,21 @@ export default function CreateDishForm({ initialData, dishId, onSuccess, onCance
     [form.ingredients],
   );
 
-  const labourCost    = parseFloat(form.labour_cost) || 0;
+  const labourCost = parseFloat(form.labour_cost) || 0;
   const estimatedCost = ingredientCost + labourCost;
-
-  // ── Validation ────────────────────────────────────────────────────────────
 
   function validate(): boolean {
     const errs: Record<string, string> = {};
-    if (!form.dish_type)      errs.dish_type     = 'Please select a dish type';
-    if (!form.name.trim())    errs.name          = 'Dish name is required';
+    if (!form.dish_type) errs.dish_type = 'Please select a dish type';
+    if (!form.name.trim()) errs.name = 'Dish name is required';
     if (categories.length > 0 && !form.category) errs.category = 'Category is required';
-    if (!form.unit_type)      errs.unit_type     = 'Unit type is required';
-    if (!form.price_unit)     errs.price_unit    = 'Price unit is required';
-    if (!form.base_price)     errs.base_price    = 'Base price is required';
-    if (!form.selling_price)  errs.selling_price = 'Selling price is required';
+    if (!form.unit_type) errs.unit_type = 'Unit type is required';
+    if (!form.price_unit) errs.price_unit = 'Price unit is required';
+    if (!form.base_price) errs.base_price = 'Base price is required';
+    if (!form.selling_price) errs.selling_price = 'Selling price is required';
     setErrors(errs);
     return Object.keys(errs).length === 0;
   }
-
-  // ── Save ──────────────────────────────────────────────────────────────────
 
   async function handleSave() {
     if (!validate()) return;
@@ -250,9 +336,9 @@ export default function CreateDishForm({ initialData, dishId, onSuccess, onCance
         : await api.post('/master/dishes/', payload);
       toast.success(dishId ? 'Dish updated successfully' : 'Dish created successfully');
       if (onSuccess) { onSuccess(); } else { router.push(listPath); }
-    } catch (err: any) {
-      const data = err?.data ?? {};
-      if (typeof data === 'object' && !Array.isArray(data)) {
+    } catch (err: unknown) {
+      const data = (err as { data?: Record<string, unknown> })?.data ?? {};
+      if (typeof data === 'object' && data !== null && !Array.isArray(data)) {
         const fieldErrs: Record<string, string> = {};
         for (const [key, val] of Object.entries(data)) {
           fieldErrs[key] = Array.isArray(val) ? (val as string[]).join(' ') : String(val);
@@ -260,22 +346,66 @@ export default function CreateDishForm({ initialData, dishId, onSuccess, onCance
         if (Object.keys(fieldErrs).length) { setErrors(fieldErrs); return; }
       }
       toast.error(
-        (Object.values(data) as string[][]).flat().join(', ') || 'Failed to save dish',
+        (Object.values(data) as unknown[]).flat().map(String).join(', ') || 'Failed to save dish',
       );
     } finally {
       setSaving(false);
     }
   }
 
-  // ── Render ────────────────────────────────────────────────────────────────
+  function inpErr(field: string): boolean {
+    return !!errors[field];
+  }
+
+  const pageTitle =
+    dishId && initialData?.name
+      ? `Edit — ${initialData.name}`
+      : dishId
+        ? 'Edit Dish'
+        : 'Create New Dish';
+  const pageSubtitle =
+    dishId ? 'Update dish details and ingredients' : 'Add a new dish to your menu';
 
   return (
-    <div className="max-w-7xl mx-auto space-y-7 pb-8">
+    <div className="min-h-screen font-sans" style={{ backgroundColor: '#fafafa' }}>
+      <header
+        className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-x-4 gap-y-3 border-b bg-white px-6 py-4"
+        style={{ borderColor: BORDER }}
+      >
+        <div className="min-w-0 flex-1 pr-4">
+          <h1 className="truncate text-[18px] font-bold leading-tight" style={{ color: NAVY }}>
+            {pageTitle}
+          </h1>
+          <p className="mt-0.5 text-[13px] text-neutral-400">{pageSubtitle}</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-3">
+          <button
+            type="button"
+            onClick={() => (onCancel ? onCancel() : router.push(listPath))}
+            disabled={saving}
+            className="inline-flex cursor-pointer items-center gap-2 rounded-[9999px] border bg-white px-5 py-2.5 text-sm font-semibold text-[#1a1a2e] outline-none transition-colors hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-50"
+            style={{ borderColor: BORDER }}
+          >
+            <ArrowLeft size={16} strokeWidth={2} aria-hidden />
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={saving}
+            className="inline-flex cursor-pointer items-center gap-2 rounded-[9999px] border px-5 py-2.5 text-sm font-semibold text-white outline-none transition-opacity disabled:cursor-not-allowed disabled:opacity-60"
+            style={{ borderColor: NAVY, backgroundColor: NAVY }}
+          >
+            {saving ? <Loader2 size={16} className="animate-spin" aria-hidden /> : <Save size={16} strokeWidth={2} aria-hidden />}
+            {saving ? 'Saving…' : 'Save Dish'}
+          </button>
+        </div>
+      </header>
 
-      {/* ── 1. Dish Type ─────────────────────────────────────────────────── */}
-      <section className='max-w-7xl'>
-        <SectionTitle>Dish Type</SectionTitle>
-        <div className="grid grid-cols-3 gap-3">
+      <div className="mx-auto max-w-7xl space-y-6 px-6 pb-12 pt-8 font-sans">
+      {/* ── Dish Type ───────────────────────────────────────────────────── */}
+      <SectionCard title="Dish Type">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           {DISH_TYPES.map(({ value, label, Icon, desc }) => {
             const active = form.dish_type === value;
             return (
@@ -283,20 +413,27 @@ export default function CreateDishForm({ initialData, dishId, onSuccess, onCance
                 key={value}
                 type="button"
                 onClick={() => set('dish_type', value)}
-                className="flex flex-col items-center gap-2 p-4 rounded-xl border-2 text-center transition-all"
-                style={{
-                  borderColor:     active ? '#D95F0E' : '#E2E8F0',
-                  backgroundColor: active ? '#FFF7F0' : '#FAFAFA',
-                }}
+                className={cn(
+                  'flex cursor-pointer flex-col gap-2 rounded-xl border p-4 text-center outline-none transition-colors',
+                  active ? 'border-transparent text-white' : 'bg-white',
+                )}
+                style={
+                  active
+                    ? { backgroundColor: NAVY }
+                    : { borderColor: BORDER, color: NAVY }
+                }
               >
-                <Icon size={22} style={{ color: active ? '#D95F0E' : '#94A3B8' }} />
+                <Icon
+                  size={24}
+                  strokeWidth={2}
+                  className="mx-auto shrink-0"
+                  style={{ color: active ? '#fff' : '#64748B' }}
+                />
+                <span className="text-[13px] font-bold leading-snug">{label}</span>
                 <span
-                  className="text-xs font-semibold"
-                  style={{ color: active ? '#D95F0E' : '#374151' }}
+                  className="text-[11px] leading-snug"
+                  style={{ color: active ? 'rgba(255,255,255,0.85)' : '#64748B' }}
                 >
-                  {label}
-                </span>
-                <span className="text-[10px] leading-tight" style={{ color: '#94A3B8' }}>
                   {desc}
                 </span>
               </button>
@@ -304,37 +441,29 @@ export default function CreateDishForm({ initialData, dishId, onSuccess, onCance
           })}
         </div>
         <FieldError msg={errors.dish_type} />
-      </section>
+      </SectionCard>
 
-      {/* ── 2. Basic Information ─────────────────────────────────────────── */}
-      <section>
-        <SectionTitle>Basic Information</SectionTitle>
-        <div className="space-y-4">
-
-          {/* Dish Name */}
+      {/* ── Basic Information ───────────────────────────────────────────── */}
+      <SectionCard title="Basic Information">
+        <div className="space-y-5">
           <div>
-            <label className={lbl}>
-              Dish Name <span style={{ color: '#DC2626' }}>*</span>
-            </label>
+            <FieldLabel htmlFor="dish-name" required>Dish name</FieldLabel>
             <input
-              className={inp}
-              style={errors.name ? ist_err : ist}
-              placeholder="e.g. Chicken Biryani"
+              id="dish-name"
+              className={pill}
+              style={{ borderColor: inpErr('name') ? RED : BORDER }}
+              placeholder="e.g., Beef Biriyani"
               value={form.name}
               onChange={e => set('name', e.target.value)}
             />
             <FieldError msg={errors.name} />
           </div>
 
-          {/* Category + Unit Type */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2 md:items-start">
             <div>
-              <label className={lbl}>
-                Category <span style={{ color: '#DC2626' }}>*</span>
-              </label>
-              <select
-                className={inp}
-                style={errors.category ? ist_err : ist}
+              <FieldLabel required>Category</FieldLabel>
+              <SelectPill
+                error={inpErr('category')}
                 value={form.category}
                 onChange={e => set('category', e.target.value)}
               >
@@ -342,113 +471,104 @@ export default function CreateDishForm({ initialData, dishId, onSuccess, onCance
                 {categories.map(c => (
                   <option key={c.id} value={c.id}>{c.name}</option>
                 ))}
-              </select>
+              </SelectPill>
               <FieldError msg={errors.category} />
             </div>
 
             <div>
-              <label className={lbl}>
-                Unit Type <span style={{ color: '#DC2626' }}>*</span>
-              </label>
-              <select
-                className={inp}
-                style={errors.unit_type ? ist_err : ist}
-                value={form.unit_type}
-                onChange={e => set('unit_type', e.target.value)}
-              >
-                <option value="">Select unit type</option>
-                {UNIT_TYPES.map(u => (
-                  <option key={u.value} value={u.value}>{u.label}</option>
-                ))}
-              </select>
-              <FieldError msg={errors.unit_type} />
-            </div>
-          </div>
-
-          {/* Veg/Non-Veg */}
-          <div className="grid grid-cols-2 gap-3">
-            <div /> {/* spacer */}
-            <div>
-              <label className={lbl}>Veg / Non-Veg</label>
-              <div className="flex gap-4 mt-2.5">
+              <FieldLabel>Veg / Non-Veg</FieldLabel>
+              <div className="flex flex-wrap gap-2 pt-1">
                 {[
-                  { value: 'veg',     label: 'Veg',     color: '#16A34A' },
-                  { value: 'non_veg', label: 'Non-Veg', color: '#DC2626' },
+                  { value: 'veg', label: 'Vegetarian', dot: '#22c55e' },
+                  { value: 'non_veg', label: 'Non-Veg', dot: '#ef4444' },
                 ].map(opt => {
                   const checked = form.veg_non_veg === opt.value;
                   return (
-                    <label key={opt.value} className="flex items-center gap-1.5 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="veg_non_veg"
-                        value={opt.value}
-                        checked={checked}
-                        onChange={() => set('veg_non_veg', opt.value)}
-                        style={{ accentColor: opt.color }}
-                      />
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => set('veg_non_veg', opt.value)}
+                      className={cn(
+                        'inline-flex cursor-pointer items-center gap-2 rounded-[9999px] border px-4 py-2.5 text-[13px] font-semibold outline-none transition-colors',
+                        checked ? 'text-white' : 'bg-white',
+                      )}
+                      style={
+                        checked
+                          ? { backgroundColor: NAVY, borderColor: NAVY }
+                          : { borderColor: BORDER, color: NAVY }
+                      }
+                    >
                       <span
-                        className="text-sm font-medium"
-                        style={{ color: checked ? opt.color : '#64748B' }}
-                      >
-                        {opt.label}
-                      </span>
-                    </label>
+                        className="h-2 w-2 shrink-0 rounded-full ring-2 ring-white/30"
+                        style={{ backgroundColor: opt.dot }}
+                      />
+                      {opt.label}
+                    </button>
                   );
                 })}
               </div>
             </div>
           </div>
 
-          {/* Description */}
           <div>
-            <label className={lbl}>
+            <FieldLabel required>Unit type</FieldLabel>
+            <SelectPill
+              error={inpErr('unit_type')}
+              value={form.unit_type}
+              onChange={e => set('unit_type', e.target.value)}
+            >
+              <option value="">Select unit type</option>
+              {UNIT_TYPES.map(u => (
+                <option key={u.value} value={u.value}>{u.label}</option>
+              ))}
+            </SelectPill>
+            <FieldError msg={errors.unit_type} />
+          </div>
+
+          <div>
+            <FieldLabel htmlFor="dish-desc">
               Description{' '}
-              <span className="font-normal" style={{ color: '#94A3B8' }}>(optional)</span>
-            </label>
+              <span className="font-normal text-neutral-400">(optional)</span>
+            </FieldLabel>
             <textarea
-              className={inp}
-              style={{ ...ist, resize: 'none' }}
-              rows={3}
-              placeholder="Brief description of the dish..."
+              id="dish-desc"
+              className={roundedBox}
+              style={{ borderColor: BORDER, resize: 'none' }}
+              rows={4}
+              placeholder="Brief description"
               value={form.description}
               onChange={e => set('description', e.target.value)}
             />
           </div>
         </div>
-      </section>
+      </SectionCard>
 
-      {/* ── 3. Pricing ───────────────────────────────────────────────────── */}
-      <section>
-        <SectionTitle>Pricing</SectionTitle>
-        <div className="grid grid-cols-3 gap-3">
+      {/* ── Pricing ───────────────────────────────────────────────────── */}
+      <SectionCard title="Pricing">
+        <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
           <div>
-            <label className={lbl}>
-              Price Unit <span style={{ color: '#DC2626' }}>*</span>
-            </label>
-            <select
-              className={inp}
-              style={errors.price_unit ? ist_err : ist}
+            <FieldLabel required>Price unit</FieldLabel>
+            <SelectPill
+              error={inpErr('price_unit')}
               value={form.price_unit}
               onChange={e => set('price_unit', e.target.value)}
             >
               {PRICE_UNITS.map(u => (
                 <option key={u.value} value={u.value}>{u.label}</option>
               ))}
-            </select>
+            </SelectPill>
             <FieldError msg={errors.price_unit} />
           </div>
 
           <div>
-            <label className={lbl}>
-              Base Price (₹) <span style={{ color: '#DC2626' }}>*</span>
-            </label>
+            <FieldLabel required>Base price (per plate)</FieldLabel>
             <input
               type="number"
               min="0"
               step="0.01"
-              className={inp}
-              style={errors.base_price ? ist_err : ist}
-              placeholder="0.00"
+              className={pill}
+              style={{ borderColor: inpErr('base_price') ? RED : BORDER }}
+              placeholder="₹ 0.00"
               value={form.base_price}
               onChange={e => set('base_price', e.target.value)}
             />
@@ -456,84 +576,76 @@ export default function CreateDishForm({ initialData, dishId, onSuccess, onCance
           </div>
 
           <div>
-            <label className={lbl}>
-              Selling Price (₹) <span style={{ color: '#DC2626' }}>*</span>
-            </label>
+            <FieldLabel required>Selling price (per plate)</FieldLabel>
             <input
               type="number"
               min="0"
               step="0.01"
-              className={inp}
-              style={errors.selling_price ? ist_err : ist}
-              placeholder="0.00"
+              className={pill}
+              style={{ borderColor: inpErr('selling_price') ? RED : BORDER }}
+              placeholder="₹ 0.00"
               value={form.selling_price}
               onChange={e => set('selling_price', e.target.value)}
             />
             <FieldError msg={errors.selling_price} />
           </div>
         </div>
-      </section>
+      </SectionCard>
 
-      {/* ── 4. Ingredients ───────────────────────────────────────────────── */}
-      <section>
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold" style={{ color: '#0F172A' }}>
+      {/* ── Ingredients ─────────────────────────────────────────────────── */}
+      <SectionCard
+        title={
+          <>
             Ingredients{' '}
-            <span className="font-normal text-xs" style={{ color: '#94A3B8' }}>(optional)</span>
-          </h3>
+            <span className="text-[15px] font-normal text-neutral-400">(optional)</span>
+          </>
+        }
+        action={
           <button
             type="button"
             onClick={addIngredient}
-            className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
-            style={{
-              color: '#D95F0E',
-              backgroundColor: '#FFF7F0',
-              border: '1px solid #FDBA74',
-            }}
+            className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border bg-white px-3 py-2 text-[12px] font-semibold outline-none transition-colors hover:bg-neutral-50"
+            style={{ borderColor: BORDER, color: NAVY }}
           >
-            <Plus size={13} />
+            <Plus size={14} strokeWidth={2.25} />
             Add Ingredient
           </button>
-        </div>
-
+        }
+      >
         {form.ingredients.length === 0 ? (
           <div
-            className="flex flex-col items-center justify-center py-8 rounded-xl text-center"
-            style={{ border: '1.5px dashed #E2E8F0', backgroundColor: '#FAFAFA' }}
+            className="flex flex-col items-center justify-center rounded-xl py-12 text-center"
+            style={{ border: `1px dashed ${BORDER}`, backgroundColor: '#fafafa' }}
           >
-            <p className="text-xs" style={{ color: '#94A3B8' }}>No ingredients added yet.</p>
-            <p className="text-xs mt-0.5" style={{ color: '#CBD5E1' }}>
-              Click "Add Ingredient" to start building the ingredient list.
+            <p className="text-[13px]" style={{ color: '#94a3b8' }}>
+              No ingredients added yet.
+            </p>
+            <p className="mt-1 max-w-sm text-[13px]" style={{ color: '#cbd5e1' }}>
+              Click &quot;Add Ingredient&quot; to get started.
             </p>
           </div>
         ) : (
-          <div className="space-y-2">
-            {/* Column headers */}
+          <div className="space-y-3">
             <div
-              className="grid gap-2 px-1"
-              style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr 32px' }}
+              className="hidden gap-2 px-1 md:grid"
+              style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr 40px' }}
             >
-              {['Ingredient Name', 'Quantity', 'Unit', '₹ / Unit', ''].map((h, i) => (
-                <span
-                  key={i}
-                  className="text-[10px] font-semibold uppercase tracking-wide"
-                  style={{ color: '#94A3B8' }}
-                >
+              {['Ingredient name', 'Quantity', 'Unit', '₹ / unit', ''].map((h, i) => (
+                <span key={i} className="text-[10px] font-bold uppercase tracking-wide text-neutral-400">
                   {h}
                 </span>
               ))}
             </div>
 
-            {/* Ingredient rows */}
             {form.ingredients.map((row, idx) => (
               <div
                 key={idx}
-                className="grid gap-2 items-center"
-                style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr 32px' }}
+                className="grid gap-2 md:items-center"
+                style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr 40px' }}
               >
                 <input
-                  className={inp}
-                  style={ist}
+                  className={pill}
+                  style={{ borderColor: BORDER }}
                   placeholder="e.g. Chicken"
                   value={row.ingredient_name}
                   onChange={e => setIngredient(idx, 'ingredient_name', e.target.value)}
@@ -542,141 +654,114 @@ export default function CreateDishForm({ initialData, dishId, onSuccess, onCance
                   type="number"
                   min="0"
                   step="any"
-                  className={inp}
-                  style={ist}
+                  className={pill}
+                  style={{ borderColor: BORDER }}
                   placeholder="0"
                   value={row.quantity}
                   onChange={e => setIngredient(idx, 'quantity', e.target.value)}
                 />
-                <select
-                  className={inp}
-                  style={ist}
+                <SelectPill
                   value={row.unit}
                   onChange={e => setIngredient(idx, 'unit', e.target.value)}
                 >
                   {UNIT_OPTIONS.map(u => (
                     <option key={u} value={u}>{u}</option>
                   ))}
-                </select>
+                </SelectPill>
                 <input
                   type="number"
                   min="0"
                   step="0.01"
-                  className={inp}
-                  style={ist}
-                  placeholder="0.00"
+                  className={pill}
+                  style={{ borderColor: BORDER }}
+                  placeholder="₹ 0.00"
                   value={row.price_per_unit}
                   onChange={e => setIngredient(idx, 'price_per_unit', e.target.value)}
                 />
                 <button
                   type="button"
                   onClick={() => removeIngredient(idx)}
-                  className="flex items-center justify-center w-8 h-8 rounded-lg transition-colors hover:bg-red-50"
+                  className="flex h-10 w-10 cursor-pointer items-center justify-center self-center rounded-lg border-0 bg-transparent outline-none"
                   title="Remove row"
                 >
-                  <Trash2 size={14} style={{ color: '#F87171' }} />
+                  <Trash2 size={16} style={{ color: RED }} />
                 </button>
               </div>
             ))}
           </div>
         )}
-      </section>
+      </SectionCard>
 
-      {/* ── 5. Labour Cost + Cost Preview ────────────────────────────────── */}
-      <section className="grid grid-cols-2 gap-4 items-start">
+      {/* ── Labour & Cost Preview ─────────────────────────────────────── */}
+      <SectionCard title="Labour Cost & Cost Preview">
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 md:items-start">
+          <div>
+            <FieldLabel htmlFor="labour-cost">
+              Labour cost (per plate){' '}
+              <span className="font-normal text-neutral-400">(optional)</span>
+            </FieldLabel>
+            <input
+              id="labour-cost"
+              type="number"
+              min="0"
+              step="0.01"
+              className={pill}
+              style={{ borderColor: BORDER }}
+              placeholder="₹ 0.00"
+              value={form.labour_cost}
+              onChange={e => set('labour_cost', e.target.value)}
+            />
+            <p className="mt-2 text-[12px] text-neutral-500">
+              Chef / cooking labour cost per serving
+            </p>
+          </div>
 
-        {/* Labour Cost */}
-        <div>
-          <label className={lbl}>
-            Labour Cost (₹){' '}
-            <span className="font-normal" style={{ color: '#94A3B8' }}>(optional)</span>
-          </label>
-          <input
-            type="number"
-            min="0"
-            step="0.01"
-            className={inp}
-            style={ist}
-            placeholder="0.00"
-            value={form.labour_cost}
-            onChange={e => set('labour_cost', e.target.value)}
-          />
-        </div>
-
-        {/* Cost Preview */}
-        <div
-          className="rounded-xl p-4"
-          style={{ backgroundColor: '#F0FDF4', border: '1.5px solid #BBF7D0' }}
-        >
-          <p className="text-xs font-semibold mb-3" style={{ color: '#15803D' }}>
-            Cost Preview
-          </p>
-          <div className="space-y-1.5 text-xs">
-            <div className="flex justify-between">
-              <span style={{ color: '#374151' }}>Ingredient Cost</span>
-              <span className="font-medium tabular-nums" style={{ color: '#0F172A' }}>
-                ₹{ingredientCost.toFixed(2)}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span style={{ color: '#374151' }}>Labour Cost</span>
-              <span className="font-medium tabular-nums" style={{ color: '#0F172A' }}>
-                ₹{labourCost.toFixed(2)}
-              </span>
-            </div>
-            <div
-              className="flex justify-between pt-2 mt-1 font-semibold"
-              style={{ borderTop: '1px solid #BBF7D0' }}
-            >
-              <span style={{ color: '#15803D' }}>Est. Cost / Serving</span>
-              <span className="tabular-nums" style={{ color: '#15803D' }}>
-                ₹{estimatedCost.toFixed(2)}
-              </span>
+          <div
+            className="rounded-xl p-5"
+            style={{ backgroundColor: MUTED_BG, border: `1px solid ${BORDER}` }}
+          >
+            <div className="space-y-3 text-[13px]">
+              <div className="flex justify-between gap-4">
+                <span style={{ color: NAVY }}>Ingredient cost</span>
+                <span className="tabular-nums font-medium" style={{ color: NAVY }}>
+                  ₹{ingredientCost.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span style={{ color: NAVY }}>Labour cost</span>
+                <span className="tabular-nums font-medium" style={{ color: NAVY }}>
+                  ₹{labourCost.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </div>
+              <div
+                className="flex justify-between gap-4 border-t pt-3 font-bold"
+                style={{ borderColor: BORDER }}
+              >
+                <span style={{ color: NAVY }}>Estimated cost / serving</span>
+                <span className="tabular-nums" style={{ color: NAVY }}>
+                  ₹{estimatedCost.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </div>
             </div>
           </div>
         </div>
-      </section>
+      </SectionCard>
 
-      {/* ── 6. Image URL ─────────────────────────────────────────────────── */}
-      <section>
-        <label className={lbl}>
-          Image URL{' '}
-          <span className="font-normal" style={{ color: '#94A3B8' }}>(optional)</span>
-        </label>
-        <input
-          type="url"
-          className={inp}
-          style={ist}
-          placeholder="https://example.com/dish-image.jpg"
-          value={form.image_url}
-          onChange={e => set('image_url', e.target.value)}
-        />
-      </section>
-
-      {/* ── Footer: Actions ──────────────────────────────────────────────── */}
-      <div
-        className="flex justify-end gap-3 pt-4"
-        style={{ borderTop: '1px solid #F1F5F9' }}
-      >
-        <button
-          type="button"
-          onClick={() => onCancel ? onCancel() : router.push(listPath)}
-          disabled={saving}
-          className="px-5 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
-          style={{ border: '1.5px solid #E2E8F0', color: '#475569', backgroundColor: '#fff' }}
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={saving}
-          className="flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold text-white transition-opacity disabled:opacity-60"
-          style={{ backgroundColor: '#D95F0E' }}
-        >
-          {saving && <Loader2 size={14} className="animate-spin" />}
-          {saving ? 'Saving…' : 'Save Dish'}
-        </button>
+      {/* ── Image ─────────────────────────────────────────────────────── */}
+      <SectionCard title="Image (Optional)">
+        <div>
+          <FieldLabel htmlFor="image-url">Image URL</FieldLabel>
+          <input
+            id="image-url"
+            type="url"
+            className={roundedBox}
+            style={{ borderColor: BORDER }}
+            placeholder="https://example.com/image.jpg"
+            value={form.image_url}
+            onChange={e => set('image_url', e.target.value)}
+          />
+        </div>
+      </SectionCard>
       </div>
     </div>
   );

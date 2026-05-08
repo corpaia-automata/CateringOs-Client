@@ -1,0 +1,11 @@
+:root {
+  --q-gold: #c8963c;
+  --q-gold-light: #fdf0d8;
+  --q-gold-border: #e8d5b0;
+  --q-dark: #1a1a1a;
+  --q-text: #333;
+  --q-muted: #888;
+  --q-bg-warm: #fdf9f3;
+  --q-font-display: 'Playfair Display', serif;
+  --q-font-body: 'DM Sans', sans-serif;
+}

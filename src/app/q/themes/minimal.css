@@ -1,0 +1,132 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+
+/**
+ * Minimal quotation theme — compact list menu, no chrome.
+ * Branding tokens (--q-primary, --q-accent) supplied from API via inline style.
+ */
+
+:root {
+  --q-primary: #111111;
+  --q-accent: #555555;
+  --q-font-heading: 'IBM Plex Sans', sans-serif;
+  --q-font-body: 'IBM Plex Sans', sans-serif;
+  --q-spacing-unit: 1rem;
+  --q-border-radius: 0;
+  --q-muted: color-mix(in srgb, var(--q-primary) 50%, white);
+}
+
+.q-cover,
+.q-about,
+.q-why-us,
+.q-event-details,
+.q-menu,
+.q-services,
+.q-pricing,
+.q-terms {
+  font-family: var(--q-font-body);
+  color: var(--q-primary);
+  padding: var(--q-spacing-unit) 0;
+  margin: 0;
+  border: none;
+  box-shadow: none;
+  background: transparent;
+}
+
+.q-section-title {
+  font-family: var(--q-font-heading);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--q-accent);
+  margin: 0 0 calc(var(--q-spacing-unit) * 0.35);
+  line-height: 1.2;
+}
+
+.q-section-body {
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: var(--q-primary);
+}
+
+.q-cover {
+  min-height: auto;
+  padding: calc(var(--q-spacing-unit) * 1.25) 0;
+  text-align: left;
+  display: block;
+}
+
+.q-menu .q-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.q-menu .q-list li,
+.q-menu .q-list .q-list-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.75rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--q-primary) 12%, white);
+  font-size: 0.8125rem;
+  line-height: 1.35;
+}
+
+.q-menu .q-list li:last-child,
+.q-menu .q-list .q-list-item:last-child {
+  border-bottom: none;
+}
+
+.q-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+  line-height: 1.35;
+  border: none;
+}
+
+.q-table th,
+.q-table td {
+  padding: 0.35rem 0.5rem 0.35rem 0;
+  text-align: left;
+  border: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--q-primary) 10%, white);
+}
+
+.q-table th {
+  font-weight: 600;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--q-accent);
+}
+
+.q-card {
+  border: none;
+  border-radius: 0;
+  padding: 0.5rem 0;
+  background: transparent;
+}
+
+.q-badge-complimentary {
+  font-size: 0.65rem;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  color: var(--q-accent);
+  margin-left: 0.25rem;
+}
+
+.q-pricing .q-section-body {
+  padding: 0;
+}
+
+.q-price-total {
+  font-family: var(--q-font-heading);
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--q-primary);
+  margin-top: 0.35rem;
+  letter-spacing: -0.02em;
+}

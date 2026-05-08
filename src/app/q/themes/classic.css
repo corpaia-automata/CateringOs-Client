@@ -1,0 +1,136 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@400;600;700&display=swap');
+
+/**
+ * Classic quotation theme — table menu, formal typography.
+ * Branding: override --q-primary / --q-accent (and optional font vars) from inline style on a wrapper.
+ */
+
+:root {
+  --q-primary: #1a1a1a;
+  --q-accent: #c9a84c;
+  --q-font-heading: 'Playfair Display', serif;
+  --q-font-body: 'Inter', sans-serif;
+  --q-spacing-unit: 2rem;
+  --q-border-radius: 6px;
+  --q-muted: color-mix(in srgb, var(--q-primary) 45%, white);
+}
+
+.q-cover,
+.q-about,
+.q-why-us,
+.q-event-details,
+.q-menu,
+.q-services,
+.q-pricing,
+.q-terms {
+  font-family: var(--q-font-body);
+  color: var(--q-primary);
+  padding: var(--q-spacing-unit) 0;
+  margin: 0;
+}
+
+.q-section-title {
+  font-family: var(--q-font-heading);
+  font-size: clamp(0.75rem, 2vw, 0.875rem);
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--q-primary);
+  margin: 0 0 calc(var(--q-spacing-unit) * 0.5);
+  border-bottom: 2px solid var(--q-accent);
+  padding-bottom: 0.5rem;
+}
+
+.q-section-body {
+  font-size: 0.95rem;
+  line-height: 1.65;
+  color: var(--q-primary);
+}
+
+.q-cover {
+  min-height: 42vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: calc(var(--q-spacing-unit) * 1.5);
+  background: linear-gradient(
+    165deg,
+    color-mix(in srgb, var(--q-accent) 12%, white) 0%,
+    color-mix(in srgb, var(--q-primary) 6%, white) 45%,
+    white 100%
+  );
+  border-radius: var(--q-border-radius);
+}
+
+.q-cover .q-section-title {
+  border: none;
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: clamp(1.75rem, 4vw, 2.5rem);
+  margin-bottom: 0.75rem;
+}
+
+.q-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  border: 1px solid color-mix(in srgb, var(--q-primary) 22%, white);
+  border-radius: var(--q-border-radius);
+  overflow: hidden;
+}
+
+.q-table th,
+.q-table td {
+  padding: 0.75rem 1rem;
+  text-align: left;
+  border-bottom: 1px solid color-mix(in srgb, var(--q-primary) 12%, white);
+}
+
+.q-table th {
+  font-family: var(--q-font-heading);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: color-mix(in srgb, var(--q-primary) 6%, white);
+  color: var(--q-primary);
+}
+
+.q-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.q-card {
+  border: 1px solid color-mix(in srgb, var(--q-primary) 15%, white);
+  border-radius: var(--q-border-radius);
+  padding: 1rem;
+  background: white;
+}
+
+.q-badge-complimentary {
+  display: inline-block;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.2rem 0.5rem;
+  border-radius: var(--q-border-radius);
+  background: color-mix(in srgb, var(--q-accent) 25%, white);
+  color: var(--q-primary);
+}
+
+.q-price-total {
+  font-family: var(--q-font-heading);
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--q-primary);
+  margin-top: 0.75rem;
+}
+
+.q-pricing .q-section-body {
+  padding: 1rem;
+  border: 1px solid color-mix(in srgb, var(--q-primary) 12%, white);
+  border-radius: var(--q-border-radius);
+  background: color-mix(in srgb, var(--q-primary) 3%, white);
+}

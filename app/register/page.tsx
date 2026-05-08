@@ -3,6 +3,8 @@
 import { useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { ChefHat, Eye, EyeOff, Loader2, CheckCircle2 } from 'lucide-react';
+import { authStorage } from '@/lib/auth';
+import { subscriptionStore, type SubscriptionApiData } from '@/store/subscriptionStore';
 
 const API = process.env.NEXT_PUBLIC_API_URL;
 
@@ -11,6 +13,19 @@ const COUNTRIES = [
   { value: 'GB', label: 'United Kingdom' },
   { value: 'US', label: 'United States' },
 ];
+
+type OnboardResponse = {
+  access?: string;
+  refresh?: string;
+  tenant_slug?: string;
+  appUrl?: string;
+  user?: {
+    id: string;
+    email: string;
+    name: string;
+  };
+  subscription?: SubscriptionApiData;
+};
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -57,7 +72,7 @@ export default function RegisterPage() {
         }),
       });
 
-      const data = await res.json();
+      const data: OnboardResponse & Record<string, unknown> = await res.json();
 
       if (!res.ok) {
         const msg = Object.values(data).flat().join(', ');
@@ -67,11 +82,16 @@ export default function RegisterPage() {
 
       setSuccess(true);
 
-      // Redirect to login with success message and pre-filled email
-      setTimeout(() => {
-        const params = new URLSearchParams({ registered: '1', email: form.email });
-        router.push(`/login?${params.toString()}`);
-      }, 1800);
+      if (data.access && data.refresh && data.tenant_slug && data.user) {
+        authStorage.setTokens(data.access, data.refresh, data.user);
+        authStorage.setSlug(data.tenant_slug);
+        subscriptionStore.getState().syncFromApi(data.subscription);
+        router.push(data.appUrl || `/app/${data.tenant_slug}/dashboard`);
+        return;
+      }
+
+      const params = new URLSearchParams({ registered: '1', email: form.email });
+      router.push(`/login?${params.toString()}`);
     } catch {
       setError('Unable to connect. Please try again.');
     } finally {

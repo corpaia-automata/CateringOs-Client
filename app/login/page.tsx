@@ -2,10 +2,27 @@
 
 import { useState, FormEvent, Suspense, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ChefHat, Eye, EyeOff, Loader2, CheckCircle2 } from 'lucide-react';
+import Image from 'next/image';
+import { Eye, EyeOff, Loader2, CheckCircle2 } from 'lucide-react';
 import { authStorage } from '@/lib/auth';
+import { subscriptionStore, type SubscriptionApiData } from '@/store/subscriptionStore';
 
 const API = process.env.NEXT_PUBLIC_API_URL;
+
+type LoginResponse = {
+  access?: string;
+  refresh?: string;
+  tenant_slug?: string;
+  user?: {
+    id: string;
+    email: string;
+    name: string;
+  };
+  error?: string;
+  detail?: string;
+  non_field_errors?: string[];
+  subscription?: SubscriptionApiData;
+};
 
 function LoginPageContent() {
   const router       = useRouter();
@@ -34,42 +51,33 @@ function LoginPageContent() {
     setLoading(true);
 
     try {
-      // Step 1: resolve the tenant from the email
-      const findRes = await fetch(`${API}/api/auth/find-tenant/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
-      });
-
-      if (!findRes.ok) {
-        setError('No account found for this email address.');
-        return;
-      }
-
-      const { slug } = await findRes.json();
-
-      // Step 2: tenant-scoped login
-      const res = await fetch(`${API}/api/app/${slug}/auth/login/`, {
+      const from = searchParams.get('from');
+      const res = await fetch(`${API}/api/auth/login/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
       });
+      const data: LoginResponse = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        const msg  = (body as any)?.detail
-          ?? (body as any)?.non_field_errors?.[0]
-          ?? 'Invalid credentials';
+        const msg = data.error
+          ?? data.detail
+          ?? data.non_field_errors?.[0]
+          ?? 'Login failed';
         setError(msg);
         return;
       }
 
-      const data = await res.json();
-      authStorage.setTokens(data.accessToken, data.refreshToken, data.user);
-      authStorage.setSlug(slug);
+      if (!data.access || !data.refresh || !data.tenant_slug || !data.user) {
+        setError('Login response is incomplete.');
+        return;
+      }
 
-      const from = searchParams.get('from') || `/app/${slug}/dashboard`;
-      router.push(from);
+      authStorage.setTokens(data.access, data.refresh, data.user);
+      authStorage.setSlug(data.tenant_slug);
+      subscriptionStore.getState().syncFromApi(data.subscription);
+
+      router.push(from || `/app/${data.tenant_slug}/dashboard`);
     } catch {
       setError('Unable to connect. Please try again.');
     } finally {
@@ -99,12 +107,16 @@ function LoginPageContent() {
           style={{ width: 300, height: 300, backgroundColor: '#fff' }} />
 
         {/* Logo */}
-        <div className="relative z-10 flex items-center gap-3">
-          <div className="flex items-center justify-center rounded-xl"
-            style={{ width: 44, height: 44, backgroundColor: '#D95F0E' }}>
-            <ChefHat size={24} color="#fff" />
-          </div>
-          <span className="text-white font-bold text-lg">CateringOS</span>
+        <div className="relative z-10">
+          <Image
+            src="/main.png"
+            alt="CateringOS"
+            width={160}
+            height={40}
+            className="object-contain object-left"
+            style={{ filter: 'brightness(0) invert(1)' }}
+            priority
+          />
         </div>
 
         {/* Center copy */}
@@ -134,12 +146,15 @@ function LoginPageContent() {
       <div className="flex flex-1 items-center justify-center px-6 py-12" style={{ backgroundColor: '#fff' }}>
         <div className="w-full" style={{ maxWidth: 380 }}>
           {/* Mobile logo */}
-          <div className="flex lg:hidden items-center gap-2 mb-8">
-            <div className="flex items-center justify-center rounded-lg"
-              style={{ width: 36, height: 36, backgroundColor: '#1C3355' }}>
-              <ChefHat size={18} color="#fff" />
-            </div>
-            <span className="font-bold text-base" style={{ color: '#1C3355' }}>CateringOS</span>
+          <div className="flex lg:hidden mb-8">
+            <Image
+              src="/main.png"
+              alt="CateringOS"
+              width={130}
+              height={34}
+              className="object-contain object-left"
+              priority
+            />
           </div>
 
           <h2 className="font-bold mb-1" style={{ fontSize: 26, color: '#0F172A' }}>

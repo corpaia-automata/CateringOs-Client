@@ -86,8 +86,8 @@ function formatQty(qty: number, unit: string): { value: string; unit: string } {
   if (unit === 'kg' && qty < 1) return { value: String(Math.round(qty * 1000)), unit: 'gram' };
   if (unit === 'litre' && qty < 1) return { value: String(Math.round(qty * 1000)), unit: 'ml' };
   if (unit === 'gram') {
-    const v = qty < 1 ? qty.toFixed(3) : qty % 1 === 0 ? String(qty) : qty.toFixed(1);
-    return { value: v, unit: 'gram' };
+    if (qty % 1 === 0) return { value: String(qty), unit: 'gram' };
+    return { value: qty.toFixed(2), unit: 'gram' };
   }
   return { value: qty % 1 === 0 ? String(qty) : qty.toFixed(2), unit };
 }

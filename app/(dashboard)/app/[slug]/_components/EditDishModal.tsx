@@ -89,12 +89,10 @@ export default function EditDishModal({ dish, open, onClose }: Props) {
 
   useEffect(() => {
     setCategoriesLoading(true);
-    api.get('/master/dish-categories/')
+    api.get('/categories/')
       .then((data: unknown) => {
-        console.log('[EditDishModal] dish-categories response:', data);
-        // Backend returns plain array (pagination_class = None on DishCategoryViewSet)
         const list = Array.isArray(data) ? (data as DishCategory[]) : [];
-        setCategories(list);
+        setCategories([...list].sort((a, b) => a.name.localeCompare(b.name)));
       })
       .catch(() => { toast.error('Failed to load categories'); })
       .finally(() => setCategoriesLoading(false));

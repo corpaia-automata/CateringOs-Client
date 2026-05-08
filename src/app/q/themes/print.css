@@ -1,0 +1,93 @@
+/**
+ * Print stylesheet for quotation pages (A4, no UI chrome).
+ * Import after a theme so these rules win in @media print / @page.
+ */
+
+@page {
+  size: A4;
+  margin: 12mm;
+}
+
+@media print {
+  html,
+  body {
+    font-size: 10pt;
+    line-height: 1.35;
+    color: #000;
+    background: #fff !important;
+  }
+
+  h1,
+  h2,
+  h3,
+  .q-section-title {
+    font-size: 14pt !important;
+    line-height: 1.2;
+    page-break-after: avoid;
+  }
+
+  .q-action-bar,
+  .q-nav,
+  .q-share-button {
+    display: none !important;
+  }
+
+  .q-menu-item,
+  .q-price-row {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .q-cover {
+    break-before: auto;
+  }
+
+  .q-cover:not(:first-child) {
+    break-before: page;
+  }
+
+  * {
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+
+  .q-cover,
+  .q-about,
+  .q-why-us,
+  .q-event-details,
+  .q-menu,
+  .q-services,
+  .q-pricing,
+  .q-terms {
+    background: transparent !important;
+    /* Prevent section containers from splitting awkwardly across page breaks. */
+    break-inside: avoid-page;
+    page-break-inside: avoid;
+  }
+
+  .q-card,
+  .q-pricing .q-section-body,
+  .q-pricing .q-price-highlight {
+    background: #fff !important;
+    border-color: #ccc !important;
+  }
+
+  .q-table {
+    border-color: #ccc !important;
+  }
+
+  a {
+    color: inherit !important;
+    text-decoration: none !important;
+  }
+
+  /* Print page number (Chromium/WebKit); content driven by CSS counters */
+  .q-terms-page-marker::after {
+    content: 'Page ' counter(page);
+    display: block;
+    text-align: center;
+    margin-top: 0.75em;
+    font-size: 9pt;
+    color: #555;
+  }
+}

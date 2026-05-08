@@ -1,336 +1,135 @@
-'use client';
+'use client'
 
-import { useEffect, useRef, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
-import { useForm, useFieldArray } from 'react-hook-form';
-import { ArrowLeft, ClipboardList, Loader2, Plus } from 'lucide-react';
-import toast from 'react-hot-toast';
-
-import { api } from '@/lib/api';
-import { Button } from '@/components/ui/button';
-
-import PersonalDetailsForm from './components/PersonalDetailsForm';
-import MenuSectionCard     from './components/MenuSectionCard';
-import type { FormValues, EnquiryPayload } from './types';
-
-// ─── Defaults ─────────────────────────────────────────────────────────────────
+import { useState } from 'react'
+import { useForm, useFieldArray } from 'react-hook-form'
+import { useRouter } from 'next/navigation'
+import { UtensilsCrossed, Plus } from 'lucide-react'
+import toast from 'react-hot-toast'
+import { api } from '@/lib/api'
+import { HeaderBar } from '@/components/enquiry/HeaderBar'
+import PersonalDetailsForm from './components/PersonalDetailsForm'
+import MenuSectionCard from './components/MenuSectionCard'
+import type { FormValues } from './types'
 
 const DEFAULT_SECTIONS: FormValues['menuSections'] = [
-  { name: 'Main Course',   items: [] },
   { name: 'Welcome Drink', items: [] },
-  { name: 'Other',         items: [] },
-];
-
-// ─── Page ─────────────────────────────────────────────────────────────────────
+  { name: 'Starter & Soups', items: [] },
+  { name: 'Main Course', items: [] },
+]
 
 export default function CreateEnquiryPage() {
-  const { slug } = useParams<{ slug: string }>();
-  const router   = useRouter();
-
-  // ── Add-category state machine: idle → dropdown → new ────────────────────
-  const [addMenuState,    setAddMenuState]    = useState<'idle' | 'dropdown' | 'new'>('idle');
-  const [newCategoryName, setNewCategoryName] = useState('');
-
-  // Refs for scroll-to-existing
-  const dropdownRef  = useRef<HTMLDivElement>(null);
-  const sectionRefs  = useRef<(HTMLDivElement | null)[]>([]);
+  const router = useRouter()
+  const [submitting, setSubmitting] = useState(false)
 
   const form = useForm<FormValues>({
     defaultValues: {
-      clientName:    '',
+      clientName: '',
       contactNumber: '',
       sourceChannel: '',
-      eventDate:     '',
-      eventTime:     '',
-      venue:         '',
-      guestCount:    '',
-      eventType:     '',
-      serviceType:   '',
-      menuSections:  DEFAULT_SECTIONS,
+      eventDate: '',
+      eventTime: '',
+      venue: '',
+      guestCount: '',
+      eventType: '',
+      serviceType: '',
+      menuSections: DEFAULT_SECTIONS,
     },
-  });
+  })
 
-  const {
-    handleSubmit,
-    control,
-    register,
-    watch,
-    getValues,
-    setValue,
-    formState: { isSubmitting },
-  } = form;
+  const { fields, append, remove } = useFieldArray({
+    control: form.control,
+    name: 'menuSections',
+  })
 
-  const {
-    fields:  sectionFields,
-    append:  appendSection,
-    remove:  removeSection,
-  } = useFieldArray({ control, name: 'menuSections' });
+  const clientName = form.watch('clientName')
+  const guestCount = parseInt(form.watch('guestCount') || '0', 10)
+  const canSubmit = clientName.trim().length > 0 && !submitting
 
-  const guestCount      = watch('guestCount');
-  const guestCountNum   = parseInt(guestCount) || 0;
-  const currentSections = watch('menuSections');   // live names for dropdown
-
-  // ── Auto-sync guestCount → all item quantities ────────────────────────────
-  useEffect(() => {
-    const count = parseInt(guestCount);
-    if (!count || count < 1) return;
-    const sections = getValues('menuSections');
-    sections.forEach((section, si) => {
-      section.items.forEach((_, ii) => {
-        setValue(
-          `menuSections.${si}.items.${ii}.quantity`,
-          String(count),
-          { shouldDirty: true }
-        );
-      });
-    });
-  // We intentionally only watch guestCount
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [guestCount]);
-
-  // ── Close dropdown on outside click ──────────────────────────────────────
-  useEffect(() => {
-    if (addMenuState !== 'dropdown') return;
-    function handleOutside(e: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setAddMenuState('idle');
-      }
-    }
-    document.addEventListener('mousedown', handleOutside);
-    return () => document.removeEventListener('mousedown', handleOutside);
-  }, [addMenuState]);
-
-  // ── Navigate to existing category ────────────────────────────────────────
-  function handleSelectExisting(index: number) {
-    setAddMenuState('idle');
-    const el = sectionRefs.current[index];
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-  }
-
-  // ── Add new category ──────────────────────────────────────────────────────
-  function handleAddCategory() {
-    const name = newCategoryName.trim();
-    if (!name) return;
-
-    const isDuplicate = currentSections.some(
-      (s) => s.name.trim().toLowerCase() === name.toLowerCase(),
-    );
-    if (isDuplicate) {
-      toast.error(`"${name}" already exists`);
-      return;
-    }
-
-    appendSection({ name, items: [] });
-    setNewCategoryName('');
-    setAddMenuState('idle');
-  }
-
-  function cancelAddCategory() {
-    setNewCategoryName('');
-    setAddMenuState('idle');
-  }
-
-  // ── Submit ────────────────────────────────────────────────────────────────
-  async function onSubmit(data: FormValues) {
-    const payload: EnquiryPayload = {
-      customer_name:  data.clientName.trim(),
-      contact_number: data.contactNumber.trim(),
-      source_channel: data.sourceChannel,
-      event_type:     data.eventType,
-      tentative_date: data.eventDate,
-      guest_count:    data.guestCount ? parseInt(data.guestCount) : null,
-    };
-
+  const onSubmit = form.handleSubmit(async (values) => {
+    setSubmitting(true)
     try {
-      await api.post('/inquiries/', payload);
-      toast.success('Enquiry created successfully!');
-      router.push(`/app/${slug}/leads`);
-    } catch (err) {
-      console.error('[CreateEnquiry] Error:', err);
-      toast.error('Failed to create enquiry. Please try again.');
+      await api.post('/inquiries/', {
+        customer_name: values.clientName.trim(),
+        contact_number: values.contactNumber.trim() || undefined,
+        source_channel: values.sourceChannel || undefined,
+        event_type: values.eventType || undefined,
+        tentative_date: values.eventDate || undefined,
+        venue: values.venue.trim() || undefined,
+        guest_count: values.guestCount ? parseInt(values.guestCount, 10) : undefined,
+        notes: [
+          values.eventTime && `Time: ${values.eventTime}`,
+          values.serviceType && `Service: ${values.serviceType}`,
+        ]
+          .filter(Boolean)
+          .join('\n') || undefined,
+      })
+      toast.success('Enquiry created')
+      router.back()
+    } catch {
+      toast.error('Failed to create enquiry. Please try again.')
+    } finally {
+      setSubmitting(false)
     }
-  }
+  })
 
-  // ─── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="max-w-7xl mx-auto p-6">
+    <div className="min-h-screen bg-slate-50">
+      <HeaderBar
+        canSubmit={canSubmit}
+        onCancel={() => router.back()}
+        onSubmit={onSubmit}
+      />
 
-      {/* ── Page Header ──────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-3 mb-6">
-        <button
-          type="button"
-          onClick={() => router.back()}
-          className="flex items-center justify-center w-8 h-8 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
-          aria-label="Go back"
-        >
-          <ArrowLeft size={16} />
-        </button>
-
-        <div className="flex items-center gap-2.5 min-w-0">
-          <div
-            className="flex items-center justify-center w-8 h-8 rounded-lg shrink-0"
-            style={{ background: 'black' }}
-          >
-            <ClipboardList size={16} style={{ color: 'black' }} />
+      <div className="max-w-7xl mx-auto px-4 py-6">
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+          {/* LEFT COLUMN — 40% */}
+          <div className="lg:col-span-2 flex flex-col gap-4">
+            <PersonalDetailsForm form={form} />
           </div>
-          <div>
-            <h1 className="text-lg font-semibold text-foreground leading-tight">New Enquiry</h1>
-            <p className="text-xs text-muted-foreground hidden sm:block">
-              Fill in client details and build the menu
-            </p>
-          </div>
-        </div>
 
-        {guestCountNum > 0 && (
-          <span className="ml-auto inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full bg-muted text-muted-foreground">
-            {guestCountNum} guests
-          </span>
-        )}
-      </div>
-
-      {/* ── Form ─────────────────────────────────────────────────────────── */}
-      <form onSubmit={handleSubmit(onSubmit)} noValidate>
-
-        {/* 2-column grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
-          {/* LEFT: Form inputs */}
-          <PersonalDetailsForm form={form} />
-
-          {/* RIGHT: Menu builder */}
-          <div className="rounded-xl border border-slate-300 p-6">
-
-            <h2 className="text-sm font-semibold text-foreground mb-4">Menu Details</h2>
-
-            {/* Category list */}
-            <div className="space-y-4">
-              {sectionFields.map((field, index) => (
-                <MenuSectionCard
-                  key={field.id}
-                  ref={(el) => { sectionRefs.current[index] = el; }}
-                  control={control}
-                  register={register}
-                  sectionIndex={index}
-                  guestCount={guestCountNum}
-                  canDelete={sectionFields.length > 1}
-                  onRemove={() => removeSection(index)}
-                />
-              ))}
-            </div>
-
-            {/* ── Add Category ─────────────────────────────────────────── */}
-            <div className="mt-4 relative" ref={dropdownRef}>
-
-              {addMenuState === 'new' ? (
-                /* Input mode — create a new category */
-                <div className="flex gap-2">
-                  <input
-                    autoFocus
-                    value={newCategoryName}
-                    onChange={(e) => setNewCategoryName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter')  { e.preventDefault(); handleAddCategory(); }
-                      if (e.key === 'Escape') { cancelAddCategory(); }
-                    }}
-                    placeholder="e.g. Dessert, Snacks, Tea…"
-                    className="h-9 text-sm flex-1 rounded-md border border-input bg-background px-3 focus:outline-none focus:ring-1 focus:ring-ring"
-                  />
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={handleAddCategory}
-                    disabled={!newCategoryName.trim()}
-                    className="shrink-0"
+          {/* RIGHT COLUMN — 60% */}
+          <div className="lg:col-span-3">
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+              <div className="flex items-center justify-between mb-5">
+                <div className="flex items-center gap-2.5">
+                  <div
+                    className="h-8 w-8 flex items-center justify-center rounded-lg"
+                    style={{ background: 'rgba(217,95,14,0.10)' }}
                   >
-                    Add
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    onClick={cancelAddCategory}
-                    className="shrink-0"
-                  >
-                    Cancel
-                  </Button>
+                    <UtensilsCrossed size={16} style={{ color: 'black' }} />
+                  </div>
+                  <h2 className="text-[15px] font-bold text-slate-900">Menu &amp; Packages</h2>
                 </div>
-              ) : (
-                <>
-                  {/* Trigger button */}
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setAddMenuState(addMenuState === 'dropdown' ? 'idle' : 'dropdown')
-                    }
-                    className="w-full flex items-center justify-center gap-1.5 h-9 rounded-lg border border-dashed border-border text-sm text-muted-foreground hover:text-foreground hover:border-primary/50 transition-colors"
-                  >
-                    <Plus size={14} />
-                    Add Category
-                  </button>
 
-                  {/* Dropdown — opens upward */}
-                  {addMenuState === 'dropdown' && (
-                    <div className="absolute bottom-full mb-1.5 left-0 right-0 z-20 rounded-lg border border-border bg-popover shadow-lg overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => append({ name: '', items: [] })}
+                  className="inline-flex items-center gap-1.5 rounded-full border px-3 py-2 text-[12px] font-semibold text-white transition-colors"
+                  style={{ background: 'black' }}
+                >
+                  <Plus size={14} strokeWidth={2.25} />
+                  Add Category
+                </button>
+              </div>
 
-                      {/* Existing categories */}
-                      {currentSections.map((section, index) => (
-                        <button
-                          key={index}
-                          type="button"
-                          onClick={() => handleSelectExisting(index)}
-                          className="w-full flex items-center px-3 py-2 text-sm text-foreground hover:bg-muted truncate"
-                        >
-                          {section.name.trim() || (
-                            <span className="text-muted-foreground italic">Unnamed</span>
-                          )}
-                        </button>
-                      ))}
-
-                      {/* Divider */}
-                      <div className="border-t border-border" />
-
-                      {/* Create new */}
-                      <button
-                        type="button"
-                        onClick={() => setAddMenuState('new')}
-                        className="w-full flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-primary hover:bg-muted"
-                      >
-                        <Plus size={13} />
-                        Create New Category
-                      </button>
-
-                    </div>
-                  )}
-                </>
-              )}
-
+              <div className="flex flex-col gap-3">
+                {fields.map((field, index) => (
+                  <MenuSectionCard
+                    key={field.id}
+                    control={form.control}
+                    register={form.register}
+                    setValue={form.setValue}
+                    sectionIndex={index}
+                    guestCount={guestCount}
+                    canDelete={fields.length > 1}
+                    onRemove={() => remove(index)}
+                  />
+                ))}
+              </div>
             </div>
-
           </div>
-
         </div>
-
-        {/* ── Bottom Actions ────────────────────────────────────────────── */}
-        <div className="flex items-center justify-between mt-6 pt-5 border-t border-border">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => router.back()}
-            disabled={isSubmitting}
-          >
-            Cancel
-          </Button>
-          <Button type="submit" disabled={isSubmitting}>
-            {isSubmitting
-              ? <><Loader2 size={14} className="animate-spin mr-1.5" /> Creating…</>
-              : 'Create Enquiry'
-            }
-          </Button>
-        </div>
-
-      </form>
+      </div>
     </div>
-  );
+  )
 }

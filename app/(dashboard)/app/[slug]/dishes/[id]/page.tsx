@@ -63,7 +63,9 @@ function ErrorState({ onBack }: { onBack: () => void }) {
 // ── Page ───────────────────────────────────────────────────────────────────────
 
 export default function DishDetailPage() {
-  const { slug, id: dishId } = useParams<{ slug: string; id: string }>();
+  const params = useParams<{ slug: string; id: string }>();
+  const slug = params?.slug ?? '';
+  const dishId = params?.id ?? '';
   const router = useRouter();
 
   const [editOpen,   setEditOpen]   = useState(false);

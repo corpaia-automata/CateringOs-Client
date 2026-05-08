@@ -2,10 +2,10 @@
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useRouter, useParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import {
   Users, Calendar, IndianRupee, Clock,
-  TrendingUp, TrendingDown, UtensilsCrossed, ChevronDown,
+  TrendingUp, TrendingDown, ChevronDown, FileText, ArrowRight,
 } from 'lucide-react';
 import {
   LineChart, Line, BarChart, Bar,
@@ -13,6 +13,7 @@ import {
 } from 'recharts';
 import { api } from '@/lib/api';
 import { Skeleton } from '@/components/ui/skeleton';
+import DashboardGreeting from '@/components/dashboard/DashboardGreeting';
 import Link from 'next/link';
 
 // ─── Placeholder data ─────────────────────────────────────────────────────────
@@ -37,13 +38,6 @@ const EVENTS_DAY_PLACEHOLDER = [
   { label: 'Sun', count: 5 },
 ];
 
-const DISHES_PLACEHOLDER = [
-  { dish_name: 'Chicken Biryani', total_quantity: 124, total_revenue: 45000 },
-  { dish_name: 'Mutton Rogan Josh', total_quantity: 89, total_revenue: 67000 },
-  { dish_name: 'Paneer Butter Masala', total_quantity: 76, total_revenue: 22000 },
-  { dish_name: 'Veg Pulao', total_quantity: 65, total_revenue: 15000 },
-];
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function formatINR(value: number | string | undefined | null): string {
@@ -59,11 +53,54 @@ function fmtDate(dateStr: string): string {
   });
 }
 
+function fmtTime(time?: string): string {
+  if (!time) return '—';
+  const [h, m] = time.split(':');
+  const hour = Number(h);
+  if (Number.isNaN(hour) || !m) return time;
+  return `${hour % 12 || 12}:${m} ${hour >= 12 ? 'PM' : 'AM'}`;
+}
+
+function getDateTile(dateStr?: string) {
+  if (!dateStr) return { month: '—', day: '—' };
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return { month: '—', day: '—' };
+  return {
+    month: d.toLocaleDateString('en-IN', { month: 'short' }).toUpperCase(),
+    day: String(d.getDate()),
+  };
+}
+
 function toSentenceCase(str: string): string {
   return str
     .toLowerCase()
     .replace(/_/g, ' ')
     .replace(/^\w/, c => c.toUpperCase());
+}
+
+function getQuotationAction(lead: any): string {
+  const status = String(lead?.latest_quotation_status || '').toLowerCase();
+  if (status.includes('accept') || status.includes('won') || status.includes('confirm')) return 'Quotation accepted';
+  if (status.includes('reject') || status.includes('lost')) return 'Quotation rejected';
+  if (status.includes('draft')) return 'Drafting Quotation';
+  if (status.includes('quote')) return 'Quotation shared';
+  return lead?.has_quotation ? 'Quotation shared' : 'Drafting Quotation';
+}
+
+function getLeadFlowStatus(lead: any): 'PLANNING' | 'SUCCESS' | 'LOST' {
+  const leadStatus = String(lead?.status || '').toUpperCase();
+  if (leadStatus === 'SUCCESS' || leadStatus === 'LOST' || leadStatus === 'PLANNING') {
+    return leadStatus as 'PLANNING' | 'SUCCESS' | 'LOST';
+  }
+
+  const quotationStatus = String(lead?.latest_quotation_status || '').toLowerCase();
+  if (quotationStatus.includes('accept') || quotationStatus.includes('won') || quotationStatus.includes('confirm')) {
+    return 'SUCCESS';
+  }
+  if (quotationStatus.includes('reject') || quotationStatus.includes('lost')) {
+    return 'LOST';
+  }
+  return 'PLANNING';
 }
 
 // ─── Custom Tooltip ───────────────────────────────────────────────────────────
@@ -217,6 +254,102 @@ function StatusBadge({ value }: { value: string }) {
   );
 }
 
+function LeadStatusInfographic({
+  status,
+  hasQuotation,
+  convertedEventId,
+  convertedEventStatus,
+}: {
+  status: string;
+  hasQuotation: boolean;
+  convertedEventId?: string | null;
+  convertedEventStatus?: string | null;
+}) {
+  const isSuccess = status === 'SUCCESS' || convertedEventStatus === 'CONFIRMED' || Boolean(convertedEventId);
+  const isLost = status === 'LOST';
+  const isQuotedStage = !isSuccess && !isLost && hasQuotation;
+  const isCreatedStage = !isSuccess && !isLost && !hasQuotation;
+
+  const createdState: 'done' | 'active' | 'pending' = isCreatedStage ? 'active' : 'done';
+  const quotedState: 'done' | 'active' | 'pending' = isQuotedStage ? 'active' : (isSuccess || isLost ? 'done' : 'pending');
+  const finalState: 'done' | 'active' | 'pending' = isSuccess || isLost ? 'done' : 'pending';
+  const finalLabel = isSuccess ? 'WON' : isLost ? 'LOST' : 'DECISION';
+
+  function stepStyles(stepState: 'done' | 'active' | 'pending', isFinal = false) {
+    if (stepState === 'done') {
+      if (isFinal && isLost) return { border: '#EF4444', color: '#EF4444', text: '#DC2626' };
+      return { border: '#10B981', color: '#10B981', text: '#0F172A' };
+    }
+    if (stepState === 'active') {
+      return { border: '#3B82F6', color: '#3B82F6', text: '#0F172A' };
+    }
+    return { border: '#CBD5E1', color: '#CBD5E1', text: '#94A3B8' };
+  }
+
+  const s1 = stepStyles(createdState);
+  const s2 = stepStyles(quotedState);
+  const s3 = stepStyles(finalState, true);
+  const connector12 = isQuotedStage || isSuccess || isLost ? '#10B981' : '#CBD5E1';
+  const connector23 = isSuccess ? '#10B981' : isLost ? '#9CA3AF' : '#CBD5E1';
+
+  function OrbitNode({
+    state,
+    style,
+    isFinal,
+  }: {
+    state: 'done' | 'active' | 'pending';
+    style: { border: string; color: string };
+    isFinal?: boolean;
+  }) {
+    const symbol = isLost && isFinal ? '×' : state === 'done' ? '✓' : state === 'active' ? '•' : '◌';
+    return (
+      <span
+        className="relative w-7 h-7 rounded-full border-2 flex items-center justify-center text-[11px] font-bold bg-white"
+        style={{ borderColor: style.border, color: style.color }}
+      >
+        <span
+          className="absolute inset-[5px] rounded-full border"
+          style={{
+            borderColor: style.border,
+            opacity: state === 'pending' ? 0.5 : 0.9,
+          }}
+        />
+        {state === 'active' && (
+          <span
+            className="absolute inset-[2px] rounded-full border border-dashed animate-spin"
+            style={{
+              borderColor: style.border,
+              opacity: 0.9,
+              animationDuration: '2.2s',
+            }}
+          />
+        )}
+        <span className="relative z-10">{symbol}</span>
+      </span>
+    );
+  }
+
+  return (
+    <div className="w-[225px] shrink-0">
+      <div className="relative px-2 pt-1">
+        <div className="absolute left-[28px] right-[28px] top-[14px] h-[2px] rounded-full" style={{ backgroundColor: '#E2E8F0' }} />
+        <div className="absolute left-[28px] top-[14px] h-[2px] rounded-full" style={{ width: 'calc(50% - 28px)', backgroundColor: connector12 }} />
+        <div className="absolute left-1/2 top-[14px] h-[2px] rounded-full" style={{ width: 'calc(50% - 28px)', backgroundColor: connector23 }} />
+        <div className="relative grid grid-cols-3">
+          <div className="flex justify-center"><OrbitNode state={createdState} style={s1} /></div>
+          <div className="flex justify-center"><OrbitNode state={quotedState} style={s2} /></div>
+          <div className="flex justify-center"><OrbitNode state={finalState} style={s3} isFinal /></div>
+        </div>
+      </div>
+      <div className="grid grid-cols-3 mt-1 text-[11px] font-semibold tracking-wide text-center">
+        <span style={{ color: s1.text }}>CREATED</span>
+        <span style={{ color: s2.text }}>QUOTED</span>
+        <span style={{ color: s3.text }}>{finalLabel}</span>
+      </div>
+    </div>
+  );
+}
+
 // ─── Section card wrapper ─────────────────────────────────────────────────────
 
 function Card({ children, className = '' }: { children: React.ReactNode; className?: string }) {
@@ -237,14 +370,49 @@ function Card({ children, className = '' }: { children: React.ReactNode; classNa
 
 type RevenueRange = 'daily' | 'weekly' | 'monthly';
 
+function formatDateParam(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+/** YYYY-MM-DD from an event record for calendar comparisons (includes today). */
+function eventDateKey(e: Record<string, unknown>): string | null {
+  const raw = e.event_date ?? e.eventDate;
+  if (raw == null || raw === '') return null;
+  const s = String(raw).trim();
+  const head = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (head) return head[1];
+  const dt = new Date(s);
+  if (Number.isNaN(dt.getTime())) return null;
+  return formatDateParam(dt);
+}
+
+async function getUpcomingEventsSafe() {
+  const today = new Date();
+  const horizon = new Date(today);
+  horizon.setDate(today.getDate() + 30);
+  const query = `event_date_after=${formatDateParam(today)}&event_date_before=${formatDateParam(horizon)}&ordering=event_date`;
+  return api.get(`/events/?${query}`);
+}
+
+function createdAtMs(lead: Record<string, unknown>): number {
+  const raw = lead.created_at ?? lead.createdAt;
+  if (raw == null || raw === '') return 0;
+  const t = new Date(String(raw)).getTime();
+  return Number.isNaN(t) ? 0 : t;
+}
+
 export default function DashboardPage() {
   const [revenueRange, setRevenueRange] = useState<RevenueRange>('weekly');
+  const router = useRouter();
 
   // ── Queries ──
 
   const { data: leadsData, isLoading: leadsLoading } = useQuery({
     queryKey: ['leads-month'],
-    queryFn: () => api.get('/inquiries/?created_month=current'),
+    queryFn: () => api.get('/inquiries/?ordering=-created_at'),
   });
 
   const { data: events, isLoading: eventsLoading } = useQuery({
@@ -259,17 +427,12 @@ export default function DashboardPage() {
 
   const { data: upcomingEvents, isLoading: upcomingLoading } = useQuery({
     queryKey: ['upcoming-events'],
-    queryFn: () => api.get('/events/?upcoming=true&filter=next7'),
+    queryFn: getUpcomingEventsSafe,
   });
 
   const { data: revenueData, isLoading: revenueLoading } = useQuery({
     queryKey: ['revenue-trend', revenueRange],
     queryFn: () => api.get(`/reports/revenue-trend/?range=${revenueRange}`),
-  });
-
-  const { data: topDishes, isLoading: dishesLoading } = useQuery({
-    queryKey: ['top-dishes'],
-    queryFn: () => api.get('/reports/top-dishes/'),
   });
 
   // ── Derived values ──
@@ -279,7 +442,22 @@ export default function DashboardPage() {
   const monthlyRevenue = (dashData as any)?.monthly_revenue ?? 0;
   const pendingAmount  = (dashData as any)?.pending_payment_amount ?? 0;
 
-  const upcomingList: any[] = (upcomingEvents as any)?.results ?? (upcomingEvents as any) ?? [];
+  const upcomingRaw: any[] = (upcomingEvents as any)?.results ?? (upcomingEvents as any) ?? [];
+  const todayKey = formatDateParam(new Date());
+  const upcomingList = (Array.isArray(upcomingRaw) ? upcomingRaw : [])
+    .filter((e: Record<string, unknown>) => {
+      const key = eventDateKey(e);
+      return key != null && key >= todayKey;
+    })
+    .sort((a: Record<string, unknown>, b: Record<string, unknown>) => {
+      const da = eventDateKey(a) ?? '';
+      const db = eventDateKey(b) ?? '';
+      if (da !== db) return da.localeCompare(db);
+      return String(a.event_time ?? a.eventTime ?? '').localeCompare(
+        String(b.event_time ?? b.eventTime ?? ''),
+      );
+    })
+    .slice(0, 3);
 
   const rawRevenueTrend: any[] = (revenueData as any)?.results ?? (revenueData as any) ?? [];
   const isRevenueSample = !rawRevenueTrend?.length;
@@ -289,17 +467,19 @@ export default function DashboardPage() {
   const isEventsDaySample = !rawEventsByDay?.length;
   const eventsByDay = rawEventsByDay?.length ? rawEventsByDay : EVENTS_DAY_PLACEHOLDER;
 
-  const rawDishes: any[] = (topDishes as any)?.results ?? (topDishes as any) ?? [];
-  const isDishesSample = !rawDishes?.length;
-  const dishes = rawDishes?.length ? rawDishes : DISHES_PLACEHOLDER;
+  const leadRows: any[] = (leadsData as any)?.results ?? (leadsData as any) ?? [];
+  const recentQuotations = [...leadRows]
+    .filter((lead: any) => Boolean(lead?.has_quotation) || Boolean(lead?.latest_quotation_status))
+    .sort((a: Record<string, unknown>, b: Record<string, unknown>) => createdAtMs(b) - createdAtMs(a))
+    .slice(0, 3);
 
   // ── Render ──
 
   return (
     <div className="flex flex-col gap-6 pb-8">
-      <div className='px-3'>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight"> Your Dashboard</h1>
-        </div>
+      <div className="px-3">
+        <DashboardGreeting eyebrow="Overview" />
+      </div>
 
       {/* ── KPI Cards ── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -310,8 +490,7 @@ export default function DashboardPage() {
           iconBg="rgba(16,185,129,0.12)"
           iconColor="#10B981"
           href="/leads?filter=this_month"
-          subtitle="+12% from last month"
-          subtitleIcon={<TrendingUp size={13} />}
+          // subtitleIcon={<TrendingUp size={13} />}
           subtitleColor="#10B981"
           loading={leadsLoading}
         />
@@ -322,8 +501,7 @@ export default function DashboardPage() {
           iconBg="rgba(99,102,241,0.12)"
           iconColor="#6366F1"
           href="/events"
-          subtitle="Next 30 days"
-          subtitleIcon={<TrendingDown size={13} />}
+          // subtitleIcon={<TrendingDown size={13} />}
           subtitleColor="#6366F1"
           loading={eventsLoading}
         />
@@ -334,8 +512,7 @@ export default function DashboardPage() {
           iconBg="rgba(99,102,241,0.10)"
           iconColor="#6366F1"
           href="/reports/revenue"
-          subtitle="Confirmed events"
-          subtitleIcon={<TrendingDown size={13} />}
+          // subtitleIcon={<TrendingDown size={13} />}
           subtitleColor="#6366F1"
           loading={dashLoading}
         />
@@ -346,230 +523,94 @@ export default function DashboardPage() {
           iconBg="rgba(244,63,94,0.10)"
           iconColor="#F43F5E"
           href="/events?payment_status=PENDING"
-          subtitle="3 events overdue"
-          subtitleIcon={<TrendingDown size={13} />}
+          // subtitleIcon={<TrendingDown size={13} />}
           subtitleColor="#F43F5E"
           loading={dashLoading}
         />
       </div>
 
-      {/* ── Row 1: Upcoming Events (60%) + Top Dishes (40%) ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+      {/* ── Sidebar spans full height: Upcoming flex-1 grows, Events per Day sits directly under */}
+      <div className="flex flex-col gap-4 lg:grid lg:grid-cols-5 lg:gap-4 lg:items-stretch">
 
-        {/* Upcoming Events */}
-        <Card className="lg:col-span-3 flex flex-col overflow-hidden">
-          {/* Header */}
+        {/* Recent Quotations */}
+        <Card className="order-2 flex w-full flex-col overflow-hidden lg:order-none lg:col-span-3 lg:row-start-1 lg:col-end-4 lg:min-w-0">
           <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: '1px solid #F1F5F9' }}>
-            <h2 className="font-bold" style={{ fontSize: 15, color: '#0F172A' }}>
-              Upcoming Events
-            </h2>
-            <Link
-              href="/events"
-              className="font-semibold transition-colors hover:opacity-70"
-              style={{ fontSize: 13, color: '#10B981' }}
-            >
-              View All
+            <h2 className="font-bold" style={{ fontSize: 15, color: '#0F172A' }}>Recent Quotations</h2>
+            <Link href="/leads" className="font-semibold transition-colors hover:opacity-70" style={{ fontSize: 13, color: '#2563EB' }}>
+              View all Enquiries
             </Link>
           </div>
 
-          {/* Table */}
-          <div className="overflow-x-auto flex-1">
-            {upcomingLoading ? (
-              <div className="p-6 flex flex-col gap-3">
-                {Array.from({ length: 4 }).map((_, i) => (
-                  <Skeleton key={i} className="h-12 w-full rounded-xl" />
-                ))}
-              </div>
-            ) : upcomingList.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-20">
-                <div
-                  className="flex items-center justify-center rounded-2xl mb-4"
-                  style={{ width: 56, height: 56, background: '#F8FAFC', border: '1px solid #E2E8F0' }}
-                >
-                  <Calendar size={24} style={{ color: '#CBD5E1' }} />
-                </div>
-                <p className="font-medium" style={{ fontSize: 14, color: '#94A3B8' }}>No upcoming events</p>
-                <p style={{ fontSize: 12, color: '#CBD5E1', marginTop: 4 }}>Events will appear here once scheduled</p>
+          <div className="flex flex-col px-6 py-4 gap-3">
+            {leadsLoading ? (
+              Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-24 w-full rounded-xl" />)
+            ) : recentQuotations.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12">
+                <p style={{ fontSize: 12, color: '#94A3B8' }}>No recent quotations</p>
               </div>
             ) : (
-              <table className="w-full">
-                <thead>
-                  <tr style={{ borderBottom: '1px solid #F1F5F9' }}>
-                    {['Event', 'Date', 'Guests', 'Status'].map(h => (
-                      <th
-                        key={h}
-                        className="px-5 py-3 text-left font-semibold uppercase tracking-wide"
-                        style={{ fontSize: 10, color: '#10B981', letterSpacing: '0.07em' }}
-                      >
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {upcomingList.slice(0, 3).map((event: any) => (
-                    <tr
-                      key={event.id}
-                      onClick={() => { window.location.href = `/events/${event.id}`; }}
-                      className="group cursor-pointer transition-colors duration-150"
-                      style={{ borderBottom: '1px solid #F8FAFC' }}
-                      onMouseEnter={e => (e.currentTarget.style.background = '#F8FAFC')}
-                      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                    >
-                      {/* Event + venue */}
-                      <td className="px-5 py-4">
-                        <span className="font-bold block" style={{ fontSize: 13, color: '#0F172A' }}>
-                          {event.event_name || event.name || '—'}
-                        </span>
-                        {event.venue && (
-                          <span className="block mt-0.5" style={{ fontSize: 11, color: '#94A3B8' }}>
-                            {event.venue}
+              recentQuotations.map((lead: any, index: number) => (
+                <div key={lead.id ?? index} className="rounded-2xl p-5" style={{ border: '1px solid #E2E8F0', backgroundColor: '#fff' }}>
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0 flex items-start gap-3">
+                      <span className="inline-flex items-center justify-center rounded-xl shrink-0" style={{ width: 40, height: 40, backgroundColor: '#EEF2FF', color: '#3B82F6' }}>
+                        <FileText size={18} />
+                      </span>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="font-bold truncate" style={{ fontSize: 14, color: '#0F172A' }}>
+                            {lead.customer_name || lead.client_name || 'Unknown Customer'}
+                          </p>
+                          <span className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{ backgroundColor: '#F1F5F9', color: '#64748B' }}>
+                            {lead.quotation_number || `QT-${new Date().getFullYear()}-${String(index + 1).padStart(4, '0')}`}
                           </span>
-                        )}
-                      </td>
-                      <td className="px-5 py-4 whitespace-nowrap" style={{ fontSize: 12, color: '#64748B' }}>
-                        {event.event_date ? fmtDate(event.event_date) : '—'}
-                      </td>
-                      <td className="px-5 py-4" style={{ fontSize: 12, color: '#64748B' }}>
-                        {event.guest_count != null ? (
-                          <span className="font-medium" style={{ color: '#0F172A' }}>{event.guest_count}</span>
-                        ) : '—'}
-                      </td>
-                      <td className="px-5 py-4">
-                        <StatusBadge value={event.status} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </Card>
+                        </div>
+                        <p className="text-sm mt-1" style={{ color: '#64748B' }}>
+                          Last Action: {getQuotationAction(lead)}
+                        </p>
+                      </div>
+                    </div>
 
-        {/* Top Dishes */}
-        <Card className="lg:col-span-2 flex flex-col overflow-hidden">
-          {/* Header */}
-          <div
-            className="flex items-center justify-between px-6 py-4"
-            style={{ borderBottom: '1px solid #F1F5F9' }}
-          >
-            <h2 className="font-bold" style={{ fontSize: 15, color: '#0F172A' }}>
-              Top Dishes
-            </h2>
-
-            <Link
-              href="/master"
-              className="font-semibold transition-colors hover:opacity-70"
-              style={{ fontSize: 13, color: '#10B981' }}
-            >
-              View Menu
-            </Link>
-          </div>
-
-          {/* Content */}
-          <div className="flex flex-col px-6 py-4 gap-4 flex-1 min-h-[260px]">
-            {dishesLoading ? (
-              // 🔹 Loading state
-              Array.from({ length: 4 }).map((_, i) => (
-                <Skeleton key={i} className="h-10 w-full rounded-lg" />
-              ))
-            ) : dishes.length === 0 ? (
-              // 🔹 Empty state (invisible placeholders, no UI change)
-              Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="flex items-center gap-3 opacity-0">
-                  {/* Rank */}
-                  <div
-                    className="flex items-center justify-center rounded-full shrink-0"
-                    style={{ width: 28, height: 28 }}
-                  />
-
-                  {/* Name */}
-                  <div className="flex-1 min-w-0">
-                    <p className="h-3 w-24 bg-transparent" />
-                    <p className="h-3 w-32 bg-transparent mt-1" />
+                    <LeadStatusInfographic
+                      status={getLeadFlowStatus(lead)}
+                      hasQuotation={Boolean(lead?.has_quotation)}
+                      convertedEventId={lead?.converted_event_id}
+                      convertedEventStatus={lead?.converted_event_status}
+                    />
                   </div>
 
-                  {/* Revenue */}
-                  <div className="text-right shrink-0">
-                    <p className="h-3 w-16 bg-transparent" />
-                    <p className="h-3 w-10 bg-transparent mt-1" />
+                  <div className="mt-4 pt-4 grid grid-cols-2 md:grid-cols-4 gap-4" style={{ borderTop: '1px solid #F1F5F9' }}>
+                    <div>
+                      <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: '#94A3B8' }}>Event Date</p>
+                      <p className="text-sm font-semibold mt-1" style={{ color: '#0F172A' }}>{lead.tentative_date ? fmtDate(lead.tentative_date) : '—'}</p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: '#94A3B8' }}>Contact</p>
+                      <p className="text-sm font-semibold mt-1" style={{ color: '#0F172A' }}>{lead.contact_number || '—'}</p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: '#94A3B8' }}>Est. Value</p>
+                      <p className="text-sm font-bold mt-1" style={{ color: '#059669' }}>{formatINR(lead.estimated_budget)}</p>
+                    </div>
+                    <div className="flex items-end">
+                      <button
+                        onClick={() => router.push(`/leads/${lead.id}`)}
+                        className="w-full rounded-xl py-2.5 px-3 text-sm font-semibold transition-colors inline-flex items-center justify-center gap-2"
+                        style={{ border: '1px solid #E2E8F0', color: '#1E293B', backgroundColor: '#fff' }}
+                      >
+                        Open Quote
+                        <ArrowRight size={14} />
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))
-            ) : (
-              // 🔹 Actual data
-              dishes.slice(0, 6).map((dish: any, i: number) => {
-                const revenue = dish.total_revenue ?? dish.total_quantity ?? 0;
-                const orders = dish.orders_count ?? dish.total_quantity ?? 0;
-                const growth = dish.growth ?? 5;
-
-                return (
-                  <div key={i} className="flex items-center gap-3">
-                    {/* Rank */}
-                    <div
-                      className="flex items-center justify-center rounded-full shrink-0 font-bold"
-                      style={{
-                        width: 28,
-                        height: 28,
-                        background: 'rgba(16,185,129,0.12)',
-                        color: '#10B981',
-                        fontSize: 12,
-                      }}
-                    >
-                      {i + 1}
-                    </div>
-
-                    {/* Name + Orders */}
-                    <div className="flex-1 min-w-0">
-                      <p
-                        className="font-semibold truncate"
-                        style={{ fontSize: 13, color: '#0F172A' }}
-                      >
-                        {dish.dish_name ?? dish.name}
-                      </p>
-                      <p
-                        style={{
-                          fontSize: 11,
-                          color: '#94A3B8',
-                          marginTop: 1,
-                        }}
-                      >
-                        {orders.toLocaleString()} orders this month
-                      </p>
-                    </div>
-
-                    {/* Revenue + Growth */}
-                    <div className="text-right shrink-0">
-                      <p
-                        className="font-bold"
-                        style={{ fontSize: 13, color: '#0F172A' }}
-                      >
-                        {formatINR(revenue)}
-                      </p>
-                      <p
-                        className="font-semibold"
-                        style={{
-                          fontSize: 11,
-                          color: '#10B981',
-                          marginTop: 1,
-                        }}
-                      >
-                        +{growth}%
-                      </p>
-                    </div>
-                  </div>
-                );
-              })
             )}
           </div>
         </Card>
-      </div>
-
-      {/* ── Row 2: Revenue Trend (60%) + Events Per Day (40%) ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
 
         {/* Revenue Trend */}
-        <Card className="lg:col-span-3 p-6">
+        <Card className="order-3 p-6 lg:order-none lg:col-span-3 lg:row-start-2 lg:col-end-4 lg:min-w-0">
           <div className="flex items-center justify-between mb-5">
             <div className="flex items-center gap-2">
               <div
@@ -641,39 +682,97 @@ export default function DashboardPage() {
           )}
         </Card>
 
-        {/* Events Per Day */}
-        <Card className="lg:col-span-2 p-6">
-          <div className="mb-5">
-            <h3 className="font-bold" style={{ fontSize: 15, color: '#0F172A' }}>Events per Day</h3>
-            <p style={{ fontSize: 12, color: '#94A3B8', marginTop: 2 }}>
-              Last 7 days
-              {isEventsDaySample && <span style={{ color: '#CBD5E1' }}> · Sample</span>}
-            </p>
-          </div>
-          {dashLoading ? (
-            <Skeleton className="h-48 w-full rounded-xl" />
-          ) : (
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={eventsByDay} margin={{ top: 8, right: 8, left: -20, bottom: 0 }} barSize={22}>
-                <CartesianGrid strokeDasharray="0" stroke="#F1F5F9" vertical={false} />
-                <XAxis
-                  dataKey="label"
-                  tick={{ fontSize: 11, fill: '#94A3B8' }}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <YAxis
-                  tick={{ fontSize: 11, fill: '#94A3B8' }}
-                  axisLine={false}
-                  tickLine={false}
-                  allowDecimals={false}
-                />
-                <Tooltip content={<EventsTooltip />} cursor={{ fill: 'rgba(241,245,249,0.4)' }} />
-                <Bar dataKey="count" radius={[4, 4, 0, 0]} fill="#10B981" />
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </Card>
+        <div className="contents lg:col-span-2 lg:col-start-4 lg:row-start-1 lg:row-span-2 lg:flex lg:min-h-0 lg:flex-col lg:gap-4 lg:self-stretch">
+          <Card className="order-1 flex min-h-[220px] w-full shrink-0 flex-col overflow-hidden lg:order-none lg:min-h-0 lg:flex-1 lg:self-stretch">
+            <div className="flex shrink-0 items-center justify-between px-6 py-5" style={{ borderBottom: '1px solid #F1F5F9' }}>
+              <div className="flex items-center gap-3">
+                <span className="inline-flex items-center justify-center rounded-xl" style={{ width: 34, height: 34, backgroundColor: '#ECFDF5', color: '#10B981' }}>
+                  <Calendar size={16} />
+                </span>
+                <h2 className="font-bold" style={{ fontSize: 16, color: '#0F172A' }}>Upcoming Events</h2>
+              </div>
+              <Link href="/events" className="font-semibold hover:opacity-80" style={{ fontSize: 14, color: '#2563EB' }}>
+                View Calendar
+              </Link>
+            </div>
+
+            <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-5">
+              {upcomingLoading ? (
+                Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-24 rounded-2xl" />)
+              ) : upcomingList.length === 0 ? (
+                <div className="flex flex-1 flex-col items-center justify-center py-10">
+                  <Calendar size={24} style={{ color: '#CBD5E1' }} />
+                  <p className="mt-2 text-sm" style={{ color: '#94A3B8' }}>No upcoming events</p>
+                </div>
+              ) : (
+                upcomingList.map((event: any) => {
+                  const dateTile = getDateTile(event.event_date);
+                  const eventTitle = event.client_name || event.customer_name || event.event_name || event.name || 'Untitled Event';
+                  const eventType = event.event_type || 'MAIN';
+                  return (
+                    <button
+                      key={event.id}
+                      onClick={() => router.push(`/events/${event.id}`)}
+                      className="w-full flex items-center gap-4 rounded-2xl p-4 text-left transition-colors hover:bg-slate-50"
+                      style={{ border: '1px solid #E2E8F0', backgroundColor: '#fff' }}
+                    >
+                      <div className="w-18 shrink-0 rounded-2xl text-center py-3" style={{ backgroundColor: '#FEF7E6' }}>
+                        <p className="text-xs font-bold tracking-wide" style={{ color: '#D97706' }}>{dateTile.month}</p>
+                        <p className="text-4 font-extrabold leading-8" style={{ color: '#B45309' }}>{dateTile.day}</p>
+                      </div>
+
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-2xl font-extrabold truncate" style={{ color: '#0F172A' }}>{eventTitle}</p>
+                          <span className="px-2.5 py-0.5 rounded-full text-xs font-bold" style={{ backgroundColor: '#FEF3C7', color: '#B45309', border: '1px solid #FDE68A' }}>
+                            {eventType}
+                          </span>
+                        </div>
+                        <div className="mt-1 flex items-center gap-5 text-sm" style={{ color: '#64748B' }}>
+                          <span className="inline-flex items-center gap-1.5"><Clock size={14} />{fmtTime(event.event_time)}</span>
+                          <span className="inline-flex items-center gap-1.5"><Users size={14} />{event.guest_count ?? 0} guests</span>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </Card>
+
+          <Card className="order-4 w-full shrink-0 p-6 lg:order-none lg:min-w-0">
+            <div className="mb-5">
+              <h3 className="font-bold" style={{ fontSize: 15, color: '#0F172A' }}>Events per Day</h3>
+              <p style={{ fontSize: 12, color: '#94A3B8', marginTop: 2 }}>
+                Last 7 days
+                {isEventsDaySample && <span style={{ color: '#CBD5E1' }}> · Sample</span>}
+              </p>
+            </div>
+            {dashLoading ? (
+              <Skeleton className="h-48 w-full rounded-xl" />
+            ) : (
+              <ResponsiveContainer width="100%" height={240}>
+                <BarChart data={eventsByDay} margin={{ top: 8, right: 8, left: -20, bottom: 0 }} barSize={24}>
+                  <CartesianGrid strokeDasharray="0" stroke="#F1F5F9" vertical={false} />
+                  <XAxis
+                    dataKey="label"
+                    tick={{ fontSize: 11, fill: '#94A3B8' }}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <YAxis
+                    tick={{ fontSize: 11, fill: '#94A3B8' }}
+                    axisLine={false}
+                    tickLine={false}
+                    allowDecimals={false}
+                  />
+                  <Tooltip content={<EventsTooltip />} cursor={{ fill: 'rgba(241,245,249,0.4)' }} />
+                  <Bar dataKey="count" radius={[4, 4, 0, 0]} fill="#10B981" />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </Card>
+        </div>
 
       </div>
     </div>

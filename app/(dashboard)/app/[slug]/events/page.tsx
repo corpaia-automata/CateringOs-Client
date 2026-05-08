@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, Suspense } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams, useParams } from 'next/navigation';
 import {
   Plus, Search, Eye, Pencil, ChevronLeft, ChevronRight, ChevronDown,
   X, Loader2, FileSpreadsheet, ShoppingCart, CheckCircle, FilterX, Calendar,
@@ -13,6 +13,7 @@ import { api } from '@/lib/api';
 import { exportEventsToExcel } from '@/lib/exportExcel';
 import { EVENT_TYPES, SERVICE_TYPES } from '@/lib/constants';
 import { Skeleton } from '@/components/ui/skeleton';
+import { parseGuestCount } from '@/lib/utils';
 import { DateRangeDropdown, type DatePreset } from '@/components/filters/DateRangeDropdown';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -38,7 +39,12 @@ interface Event {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const EVENT_STATUSES = ['All', 'DRAFT', 'CONFIRMED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'];
+const EVENT_STATUSES = [
+  { label: 'ALL', value: 'All' },
+  { label: 'IN PROGRESS', value: 'IN_PROGRESS' },
+  { label: 'SUCCESS', value: 'COMPLETED' },
+  { label: 'LOST', value: 'CANCELLED' },
+];
 const PAGE_SIZES = [10, 25, 50];
 
 const VALID_TRANSITIONS: Record<string, string[]> = {
@@ -201,28 +207,27 @@ const EMPTY_FORM = {
 };
 
 function EventDrawer({ open, onClose, editing, onSaved }: {
-  open: boolean; onClose: () => void; editing: Event | null; onSaved: () => void;
+  open: boolean; onClose: () => void; editing: Event; onSaved: () => void;
 }) {
   const [form, setForm]     = useState({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);
   const drawerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (open) {
-      setForm(editing ? {
-        client_name:            editing.client_name ?? '',
-        contact_number:         editing.contact_number ?? '',
-        service_type:           editing.service_type ?? 'BUFFET',
-        service_type_narration: editing.service_type_narration ?? '',
-        event_type:             editing.event_type ?? '',
-        event_date:             editing.event_date ?? '',
-        event_time:             editing.event_time ?? '',
-        venue:                  editing.venue ?? '',
-        guest_count:            editing.guest_count?.toString() ?? '',
-        notes:                  editing.notes ?? '',
-        status:                 editing.status ?? '',
-      } : { ...EMPTY_FORM });
-    }
+    if (!open) return;
+    setForm({
+      client_name:            editing.client_name ?? '',
+      contact_number:         editing.contact_number ?? '',
+      service_type:           editing.service_type ?? 'BUFFET',
+      service_type_narration: editing.service_type_narration ?? '',
+      event_type:             editing.event_type ?? '',
+      event_date:             editing.event_date ?? '',
+      event_time:             editing.event_time ?? '',
+      venue:                  editing.venue ?? '',
+      guest_count:            editing.guest_count != null ? String(parseGuestCount(editing.guest_count)) : '',
+      notes:                  editing.notes ?? '',
+      status:                 editing.status ?? '',
+    });
   }, [editing, open]);
 
   useEffect(() => {
@@ -254,19 +259,14 @@ function EventDrawer({ open, onClose, editing, onSaved }: {
         event_date:  form.event_date  || null,
         event_time:  form.event_time  || null,
         venue:       form.venue       || '',
-        guest_count: parseInt(form.guest_count, 10),
+        guest_count: parseGuestCount(form.guest_count),
         notes:       form.notes       || '',
       };
-      if (editing) {
-        await api.patch(`/events/${editing.id}/`, payload);
-        if (form.status && form.status !== editing.status) {
-          await api.post(`/events/${editing.id}/transition/`, { status: form.status });
-        }
-        toast.success('Event updated');
-      } else {
-        await api.post('/events/', payload);
-        toast.success('Event created');
+      await api.patch(`/events/${editing.id}/`, payload);
+      if (form.status && form.status !== editing.status) {
+        await api.post(`/events/${editing.id}/transition/`, { status: form.status });
       }
+      toast.success('Event updated');
       onSaved();
       onClose();
     } catch (err: any) {
@@ -295,8 +295,8 @@ function EventDrawer({ open, onClose, editing, onSaved }: {
         }}>
 
         <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: '#E2E8F0' }}>
-          <h2 className="font-semibold text-base" style={{ color: '#0F172A' }}>
-            {editing ? 'Edit Event' : 'New Event'}
+          <h2 className="font-semibold text-base" style={{ color: 'black' }}>
+            Edit Event
           </h2>
           <button onClick={onClose} className="p-1 rounded-lg hover:bg-slate-100">
             <X size={18} style={{ color: '#64748B' }} />
@@ -423,7 +423,7 @@ function EventDrawer({ open, onClose, editing, onSaved }: {
             className="flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold text-white"
             style={{ backgroundColor: '#D95F0E', opacity: saving ? 0.7 : 1 }}>
             {saving && <Loader2 size={14} className="animate-spin" />}
-            {saving ? 'Saving…' : editing ? 'Update Event' : 'Save Event'}
+            {saving ? 'Saving…' : 'Update Event'}
           </button>
         </div>
       </div>
@@ -435,6 +435,8 @@ function EventDrawer({ open, onClose, editing, onSaved }: {
 
 function EventsPageContent() {
   const router       = useRouter();
+  const params       = useParams<{ slug: string }>();
+  const slug         = typeof params?.slug === 'string' ? params.slug : '';
   const searchParams = useSearchParams();
   const qc           = useQueryClient();
 
@@ -442,8 +444,8 @@ function EventsPageContent() {
   const [datePreset,    setDatePreset]    = useState<DatePreset>('');
   const [dateFrom,      setDateFrom]      = useState('');
   const [dateTo,        setDateTo]        = useState('');
-  const [statusFilter,  setStatusFilter]  = useState(searchParams.get('status') ?? 'All');
-  const [paymentFilter, setPaymentFilter] = useState(searchParams.get('payment_status') ?? 'All');
+  const [statusFilter,  setStatusFilter]  = useState(searchParams?.get('status') ?? 'All');
+  const [paymentFilter, setPaymentFilter] = useState(searchParams?.get('payment_status') ?? 'All');
   const [serviceFilter, setServiceFilter] = useState('All');
   const [page,          setPage]          = useState(1);
   const [pageSize,      setPageSize]      = useState(10);
@@ -604,7 +606,7 @@ function EventsPageContent() {
   ];
 
   return (
-    <div className="flex flex-col gap-5 p-4">
+    <div className="flex flex-col gap-5 p-4 ">
 
       {/* Page Header */}
       <div className="flex items-center justify-between">
@@ -616,18 +618,18 @@ function EventsPageContent() {
           <div className="flex items-center rounded-lg overflow-hidden" style={{ border: '1px solid #E2E8F0' }}>
             <button onClick={() => setViewMode('card')} title="Card view"
               className="p-2 transition-colors"
-              style={{ backgroundColor: viewMode === 'card' ? '#1C3355' : '#fff', color: viewMode === 'card' ? '#fff' : '#64748B' }}>
+              style={{ backgroundColor: viewMode === 'card' ? 'black' : '#fff', color: viewMode === 'card' ? '#fff' : '#64748B' }}>
               <LayoutGrid size={16} />
             </button>
             <button onClick={() => setViewMode('list')} title="List view"
               className="p-2 transition-colors"
-              style={{ backgroundColor: viewMode === 'list' ? '#1C3355' : '#fff', color: viewMode === 'list' ? '#fff' : '#64748B' }}>
+              style={{ backgroundColor: viewMode === 'list' ? 'black' : '#fff', color: viewMode === 'list' ? '#fff' : '#64748B' }}>
               <LayoutList size={16} />
             </button>
           </div>
-          <button onClick={() => { setEditing(null); setDrawerOpen(true); }}
+          <button onClick={() => router.push(`/app/${slug}/events/create`)}
             className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white"
-            style={{ backgroundColor: '#D95F0E' }}>
+            style={{ backgroundColor: 'black' }}>
             <Plus size={16} /> New Event
           </button>
         </div>
@@ -721,17 +723,17 @@ function EventsPageContent() {
       </div>
 
       {/* Status Tabs */}
-      <div className="flex items-center gap-1 flex-wrap">
-        {EVENT_STATUSES.map(s => (
-          <button key={s} onClick={() => setStatusFilter(s)}
-            className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+      <div className="flex items-center gap-1 flex-wrap px-2">
+        {EVENT_STATUSES.map(({ label, value }) => (
+          <button key={value} onClick={() => setStatusFilter(value)}
+            className="px-4 py-2.5 rounded-lg text-xs font-bold transition-colors"
             style={{
-              backgroundColor: statusFilter === s ? '#1C3355' : '#fff',
-              color:           statusFilter === s ? '#fff'    : '#64748B',
+              backgroundColor: statusFilter === value ? '#1C3355' : '#fff',
+              color:           statusFilter === value ? '#fff'    : '#64748B',
               border: '1px solid',
-              borderColor:     statusFilter === s ? '#1C3355' : '#E2E8F0',
+              borderColor:     statusFilter === value ? '#1C3355' : '#E2E8F0',
             }}>
-            {s === 'All' ? 'All' : s.replace(/_/g, ' ')}
+            {label}
           </button>
         ))}
       </div>
@@ -765,15 +767,15 @@ function EventsPageContent() {
       {viewMode === 'card' && (
         isLoading
           ? (
-              <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 {Array.from({ length: pageSize }).map((_, i) => (
-                  <Skeleton key={i} className="h-52 rounded-xl" />
+                  <Skeleton key={i} className="h-64 rounded-2xl" />
                 ))}
               </div>
             )
           : events.length === 0
           ? (
-              <div className="py-20 text-center">
+              <div className="py-20 text-center ">
                 <Calendar size={40} className="mx-auto mb-3 opacity-20" style={{ color: '#64748B' }} />
                 <p className="text-sm" style={{ color: '#94A3B8' }}>No events found</p>
                 {hasFilters && (
@@ -784,86 +786,119 @@ function EventsPageContent() {
               </div>
             )
           : (
-              <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 ">
                 {events.map(event => {
-                  const pmtColor = PMT_STYLE[event.payment_status ?? '']?.color;
+                  const pending = calcPending(event);
+                  const total = fmtINR(event.total_amount);
+                  const paid = fmtINR(event.advance_amount);
+                  const pendingText = pending != null ? fmtINR(pending) : '—';
+                  const showCollectPayment = pending != null && pending > 0;
                   return (
                     <div key={event.id}
                       onClick={() => router.push(`/events/${event.id}`)}
-                      className="flex flex-col rounded-2xl"
+                      className="rounded-3xl p-5 space-y-4"
                       style={{ border: '1px solid #E8EDF2', backgroundColor: '#fff', cursor: 'pointer', transition: 'box-shadow 0.15s' }}
                       onMouseEnter={e => (e.currentTarget.style.boxShadow = '0 4px 20px rgba(0,0,0,0.07)')}
                       onMouseLeave={e => (e.currentTarget.style.boxShadow = 'none')}>
-
-                      {/* Top meta row */}
-                      <div className="flex justify-between items-center">
-                      {/* Name + event type */}
-                      <div className="px-5 py-3">
-                        <div className="text-base font-semibold text-slate-900 leading-snug">
-                          {event.client_name || '—'}
+                      <div className="flex items-start justify-between gap-3 space-y-4">
+                        <div className="flex items-start gap-3 min-w-0">
+                          <div
+                            className="shrink-0 flex items-center justify-center rounded-xl"
+                            style={{ width: 38, height: 38, backgroundColor: '#EEF2FF', color: '#6366F1' }}
+                          >
+                            <Calendar size={17} />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-2xl leading-none font-semibold text-slate-900 truncate">
+                              {event.client_name || '—'}
+                            </p>
+                            {event.contact_number && (
+                              <p className="text-sm mt-1" style={{ color: '#64748B' }}>
+                                Contact: {event.contact_number}
+                              </p>
+                            )}
+                            <div className="flex items-center gap-2 mt-2 flex-wrap">
+                              <StatusBadge value={event.status} map={STATUS_STYLE} />
+                              {event.event_type && (
+                                <span
+                                  className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold"
+                                  style={{ backgroundColor: '#F5F3FF', color: '#7C3AED' }}
+                                >
+                                  {event.event_type}
+                                </span>
+                              )}
+                            </div>
+                          </div>
                         </div>
-                        <div className="text-xs font-medium text-slate-400 mt-0.5">
-                          {event.event_type}
+                        <div className="flex items-center gap-1.5 shrink-0" onClick={e => e.stopPropagation()}>
+                          <button onClick={() => router.push(`/events/${event.id}`)}
+                            className="p-1.5 rounded-lg hover:bg-slate-100" title="View">
+                            <Eye size={14} style={{ color: '#64748B' }} />
+                          </button>
+                          <button onClick={() => { setEditing(event); setDrawerOpen(true); }}
+                            className="p-1.5 rounded-lg hover:bg-slate-100" title="Edit">
+                            <Pencil size={14} style={{ color: '#64748B' }} />
+                          </button>
                         </div>
                       </div>
-
-                      <div className="flex items-center justify-between px-5 pt-5 pb-3">
-                        {event.event_number && (
-                          <span className="text-xs font-medium tracking-wide" style={{ color: '#94A3B8' }}>
-                            {event.event_number}
-                          </span>
-                        )}
-                        <StatusBadge value={event.status} map={STATUS_STYLE} />
-                      </div>
-
-                        </div>
-
-                      {/* Divider */}
-                      <div style={{ borderTop: '1px solid #F1F5F9' }} />
-
-                      {/* Detail rows */}
-                      <div className="flex flex-col gap-3 px-5 py-4 flex-1">
-                        <div className="flex items-center gap-3 text-sm" style={{ color: '#475569' }}>
-                          <Calendar size={15} className="shrink-0" style={{ color: '#94A3B8' }} />
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-4 gap-y-2 mt-4 text-sm">
+                        <div className="flex items-center gap-2" style={{ color: '#64748B' }}>
+                          <Calendar size={14} />
                           <span>{fmtDate(event.event_date)}</span>
                         </div>
-                        <div className="flex items-center gap-3 text-sm" style={{ color: '#475569' }}>
-                          <MapPin size={15} className="shrink-0" style={{ color: '#94A3B8' }} />
-                          <span className="truncate">{event.venue || '—'}</span>
+                        <div className="flex items-center gap-2" style={{ color: '#64748B' }}>
+                          <ChevronRight size={14} />
+                          <span>{fmtTime(event.event_time) || '—'}</span>
                         </div>
-                        <div className="flex items-center gap-3 text-sm" style={{ color: '#475569' }}>
-                          <Users size={15} className="shrink-0" style={{ color: '#94A3B8' }} />
-                          <span>{event.guest_count} Guests</span>
+                        <div className="flex items-center gap-2" style={{ color: '#64748B' }}>
+                          <Users size={14} />
+                          <span>{event.guest_count} guests</span>
+                        </div>
+                        <div className="flex items-center gap-2 min-w-0" style={{ color: '#64748B' }}>
+                          <MapPin size={14} className="shrink-0" />
+                          <span className="truncate">{event.venue || '—'}</span>
                         </div>
                       </div>
 
-                      {/* Footer */}
-                      <div
-  className="flex items-center justify-between px-5 py-4 group cursor-pointer"
-  style={{ borderTop: '1px solid #F1F5F9' }}
->
-  {/* Left: Payment Status */}
-  {event.payment_status ? (
-    <div className="flex items-center gap-2 text-sm font-medium text-slate-600">
-      <span
-        className="w-2 h-2 rounded-full shrink-0"
-        style={{ backgroundColor: pmtColor ?? '#94A3B8' }}
-      />
-      {PMT_LABELS[event.payment_status] ?? event.payment_status}
-    </div>
-  ) : (
-    <span />
-  )}
+                      <div className="mt-4" style={{ borderTop: '1px solid #EEF2F7' }} />
 
-  {/* Right: CTA */}
-  <div className="flex items-center gap-1 text-sm font-medium text-slate-700 group-hover:text-slate-900 transition">
-    <span>View Event</span>
-    <ChevronRight
-      size={16}
-      className="text-slate-400 group-hover:translate-x-1 transition-transform"
-    />
-  </div>
-</div>
+                      <div className="flex items-end justify-between gap-3 mt-3">
+                        <div className="grid grid-cols-3 gap-5">
+                          <div>
+                            <p className="text-xs" style={{ color: '#94A3B8' }}>Total Amount</p>
+                            <p className="text-xl font-semibold text-slate-900 mt-1">{total}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs" style={{ color: '#94A3B8' }}>Paid</p>
+                            <p className="text-xl font-semibold text-emerald-600 mt-1">{paid}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs" style={{ color: '#94A3B8' }}>Balance</p>
+                            <p className="text-xl font-semibold mt-1" style={{ color: showCollectPayment ? '#D97706' : '#10B981' }}>
+                              {pendingText}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* <div className="flex flex-col items-end gap-2">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); router.push(`/events/${event.id}`); }}
+                            className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
+                            style={{ backgroundColor: '#1C3355' }}
+                          >
+                            Invoice
+                          </button>
+                          {showCollectPayment && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); router.push(`/events/${event.id}`); }}
+                              className="px-3 py-1.5 rounded-lg text-xs font-semibold"
+                              style={{ backgroundColor: '#ECFDF3', color: '#15803D' }}
+                            >
+                              Collect Payment
+                            </button>
+                          )}
+                        </div> */}
+                      </div>
                     </div>
                   );
                 })}
@@ -1018,12 +1053,14 @@ function EventsPageContent() {
         </div>
       )}
 
-      <EventDrawer
-        open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        editing={editing}
-        onSaved={() => qc.invalidateQueries({ queryKey: ['events'] })}
-      />
+      {editing && (
+        <EventDrawer
+          open={drawerOpen}
+          onClose={() => { setDrawerOpen(false); setEditing(null); }}
+          editing={editing}
+          onSaved={() => qc.invalidateQueries({ queryKey: ['events'] })}
+        />
+      )}
     </div>
   );
 }

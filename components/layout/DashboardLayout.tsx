@@ -2,37 +2,61 @@
 
 import { useState, useEffect } from 'react';
 import { usePathname } from 'next/navigation';
-import { Search, Bell, ChevronRight, Menu, User } from 'lucide-react';
+import { Search, Bell, ChevronRight, Menu } from 'lucide-react';
 import Sidebar from './Sidebar';
 import { authStorage } from '@/lib/auth';
+import { COS_BORDER, COS_CANVAS, COS_FOREST } from '@/lib/cosTheme';
 
 const LABEL_MAP: Record<string, string> = {
   dashboard: 'Dashboard',
-  leads:     'Leads',
-  events:    'Events',
-  grocery:   'Grocery',
-  reports:   'Reports',
-  master:    'Master Data',
-  settings:  'Settings',
+  leads: 'Leads',
+  events: 'Events',
+  grocery: 'Grocery',
+  reports: 'Reports',
+  master: 'Master Data',
+  quotations: 'Quotations',
+  settings: 'Settings',
+  enquiries: 'Enquiries',
 };
 
 function getBreadcrumbs(pathname: string) {
+  if (pathname.includes('/enquiries/create')) {
+    const parts = pathname.split('/').filter(Boolean);
+    const slug = parts[0] === 'app' && parts[1] ? parts[1] : (parts[0] ?? '');
+    const base = parts[0] === 'app' ? `/app/${slug}` : '';
+    return [
+      { label: 'Quotations', href: `${base}/quotations`, isLast: false },
+      { label: 'Create Quotation', href: pathname, isLast: true },
+    ];
+  }
   const segments = pathname.split('/').filter(Boolean);
   return segments.map((seg, i) => ({
-    label:  LABEL_MAP[seg] ?? seg.charAt(0).toUpperCase() + seg.slice(1).replace(/-/g, ' '),
-    href:   '/' + segments.slice(0, i + 1).join('/'),
+    label: LABEL_MAP[seg] ?? seg.charAt(0).toUpperCase() + seg.slice(1).replace(/-/g, ' '),
+    href: '/' + segments.slice(0, i + 1).join('/'),
     isLast: i === segments.length - 1,
   }));
 }
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const crumbs   = getBreadcrumbs(pathname);
+  const crumbs = getBreadcrumbs(pathname ?? '');
 
-  const [user]          = useState<{ full_name?: string; email?: string; role?: string } | null>(
-    () => authStorage.getUser()
-  );
+  const [user, setUser] = useState<{ full_name?: string; email?: string; role?: string } | null>(null);
+  const [headerDate, setHeaderDate] = useState<string>('');
   const [searchFocused, setSearchFocused] = useState(false);
+
+  // User + date come from client only — avoids SSR (null user) vs client (localStorage) mismatch.
+  useEffect(() => {
+    setUser(authStorage.getUser() as { full_name?: string; email?: string; role?: string } | null);
+    setHeaderDate(
+      new Date().toLocaleDateString('en-IN', {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+      }),
+    );
+  }, []);
 
   // Mobile: controls the slide-in drawer
   const [sidebarOpen, setSidebarOpen]         = useState(false);
@@ -71,7 +95,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }
   }
 
-  const sidebarWidth   = sidebarCollapsed ? 64 : 240;
+  const sidebarWidth   = sidebarCollapsed ? 84 : 268;
   const mainMarginLeft = isMobile ? 0 : sidebarWidth;
 
   const initials = user?.full_name
@@ -79,7 +103,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     : user?.email?.[0]?.toUpperCase() ?? 'U';
 
   return (
-    <div className="flex min-h-screen" style={{ background: '#F1F5F9' }}>
+    <div className="flex min-h-screen" style={{ background: COS_CANVAS }}>
       <Sidebar
         isOpen={sidebarOpen}
         isCollapsed={sidebarCollapsed}
@@ -96,12 +120,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <header
           className="sticky top-0 z-30 flex items-center justify-between gap-3"
           style={{
-            height:       72,
-            background:   'rgba(255,255,255,0.97)',
-            borderBottom: '1px solid rgba(226,232,240,0.8)',
-            paddingLeft:  16,
-            paddingRight: 16,
-            boxShadow:    '0 1px 3px rgba(0,0,0,0.04)',
+            height: 72,
+            background: 'rgba(251,252,251,0.96)',
+            borderBottom: `1px solid ${COS_BORDER}`,
+            paddingLeft: 16,
+            paddingRight: 20,
+            boxShadow: '0 1px 3px rgba(19,78,58,0.05)',
           }}
         >
           {/* ── Left: hamburger + breadcrumb ── */}
@@ -113,17 +137,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               style={{
                 width:      36,
                 height:     36,
-                background: '#F8FAFC',
-                border:     '1px solid #E2E8F0',
-                color:      '#64748B',
+                background: COS_CANVAS,
+                border: `1px solid ${COS_BORDER}`,
+                color: '#5c7168',
               }}
               onMouseEnter={e => {
-                e.currentTarget.style.background = '#F1F5F9';
-                e.currentTarget.style.color      = '#0F172A';
+                e.currentTarget.style.background = '#dce8e3';
+                e.currentTarget.style.color = COS_FOREST;
               }}
               onMouseLeave={e => {
-                e.currentTarget.style.background = '#F8FAFC';
-                e.currentTarget.style.color      = '#64748B';
+                e.currentTarget.style.background = COS_CANVAS;
+                e.currentTarget.style.color = '#5c7168';
               }}
             >
               <Menu size={15} />
@@ -133,19 +157,20 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               <nav className="flex items-center gap-1">
                 {crumbs.map((crumb, i) => (
                   <span key={crumb.href} className="flex items-center gap-1 min-w-0">
-                    {i > 0 && <ChevronRight size={13} style={{ color: '#CBD5E1', flexShrink: 0 }} />}
+                    {i > 0 && <ChevronRight size={13} style={{ color: '#9cb0a5', flexShrink: 0 }} />}
                     <span
-                      className={`truncate transition-colors duration-150 text-[13px] ${crumb.isLast ? 'font-semibold text-slate-900' : 'font-normal text-slate-400'}`}
+                      className={`truncate transition-colors duration-150 text-[13px] ${
+                        crumb.isLast ? 'font-semibold' : 'font-normal text-[#6b7f76]'
+                      }`}
+                      style={crumb.isLast ? { color: COS_FOREST } : undefined}
                     >
                       {crumb.label}
                     </span>
                   </span>
                 ))}
               </nav>
-              <p className="hidden sm:block text-[11px] font-normal text-slate-300">
-                {new Date().toLocaleDateString('en-IN', {
-                  weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
-                })}
+              <p className="hidden text-[11px] font-normal sm:block" style={{ color: '#9cb0a5' }}>
+                {headerDate || '\u00a0'}
               </p>
             </div>
           </div>
@@ -157,17 +182,18 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             <div
               className="hidden sm:flex items-center gap-2 px-3 py-2 rounded-xl transition-all duration-200"
               style={{
-                background: searchFocused ? '#fff' : '#F8FAFC',
-                border:     `1px solid ${searchFocused ? '#CBD5E1' : '#E2E8F0'}`,
+                background: searchFocused ? '#fff' : COS_CANVAS,
+                border: `1px solid ${searchFocused ? COS_FOREST : COS_BORDER}`,
                 width:      searchFocused ? 220 : 160,
-                boxShadow:  searchFocused ? '0 0 0 3px rgba(15,23,42,0.06)' : 'none',
+                boxShadow:  searchFocused ? `0 0 0 3px rgba(19,78,58,0.12)` : 'none',
               }}
             >
               <Search size={13} style={{ color: '#94A3B8', flexShrink: 0 }} />
               <input
                 type="text"
                 placeholder="Search..."
-                className="bg-transparent outline-none flex-1 min-w-0 text-[13px] text-slate-900"
+                className="bg-transparent outline-none flex-1 min-w-0 text-[13px]"
+                style={{ color: COS_FOREST }}
                 onFocus={() => setSearchFocused(true)}
                 onBlur={() => setSearchFocused(false)}
               />
@@ -186,17 +212,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               style={{
                 width:      36,
                 height:     36,
-                background: '#F8FAFC',
-                border:     '1px solid #E2E8F0',
-                color:      '#64748B',
+                background: COS_CANVAS,
+                border: `1px solid ${COS_BORDER}`,
+                color: '#5c7168',
               }}
               onMouseEnter={e => {
-                e.currentTarget.style.background = '#F1F5F9';
-                e.currentTarget.style.color      = '#0F172A';
+                e.currentTarget.style.background = '#dce8e3';
+                e.currentTarget.style.color = COS_FOREST;
               }}
               onMouseLeave={e => {
-                e.currentTarget.style.background = '#F8FAFC';
-                e.currentTarget.style.color      = '#64748B';
+                e.currentTarget.style.background = COS_CANVAS;
+                e.currentTarget.style.color = '#5c7168';
               }}
             >
               <Bell size={15} />
@@ -214,31 +240,31 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </button>
 
             {/* Divider — hidden on mobile */}
-            <div className="hidden sm:block" style={{ width: 1, height: 24, background: '#E2E8F0' }} />
+            <div className="hidden sm:block" style={{ width: 1, height: 24, background: COS_BORDER }} />
 
             {/* User avatar */}
 
-              <div className="flex items-center gap-2.5 cursor-pointer group">
+              <div className="flex items-center gap-2.5">
                 <div
-                  className="flex items-center justify-center rounded-xl transition-all duration-150 group-hover:scale-105 shrink-0"
+                  className="flex items-center justify-center rounded-xl shrink-0 text-[11px] font-bold text-white"
                   style={{
-                    width: 34,
-                    height: 34,
-                    background: 'linear-gradient(135deg, #0D1B2E, #0F2040)',
-                    boxShadow: '0 2px 8px rgba(13,27,46,0.2)',
+                    width: 36,
+                    height: 36,
+                    background: `linear-gradient(145deg, ${COS_FOREST} 0%, #0d3d2c 100%)`,
+                    boxShadow: '0 2px 10px rgba(19,78,58,0.25)',
                   }}
                 >
-                  <User size={16} color="#fff" />
+                  {initials}
                 </div>
 
-                {/* <div className="hidden md:block">
-                  <p className="text-xs font-semibold text-slate-800 leading-tight">
-                    {user?.full_name?.split(' ')[0] || 'User'}
+                <div className="hidden min-w-0 md:block">
+                  <p className="truncate text-[13px] font-semibold leading-tight" style={{ color: COS_FOREST }}>
+                    {user?.full_name || user?.email?.split('@')[0] || 'User'}
                   </p>
-                  <p className="text-[10px] text-slate-400 capitalize">
-                    {user?.role?.toLowerCase() || 'staff'}
+                  <p className="truncate text-[11px] capitalize" style={{ color: '#6b7f76' }}>
+                    {(user?.role || 'Staff').toLowerCase().replace(/_/g, ' ')}
                   </p>
-                </div> */}
+                </div>
               </div>
 
           </div>

@@ -1,0 +1,39 @@
+.header {
+  background: var(--q-dark);
+  padding: 32px 48px 28px;
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
+
+.label {
+  margin: 0;
+  font-family: var(--font-q-body), var(--q-font-body), sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--q-gold);
+}
+
+.title {
+  margin: 8px 0 0;
+  font-family: var(--font-q-display), var(--q-font-display), serif;
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: #fff;
+}
+
+.underline {
+  margin-top: 16px;
+  height: 3px;
+  width: 100%;
+  max-width: 320px;
+  background: linear-gradient(
+    90deg,
+    var(--q-gold) 0%,
+    rgba(200, 150, 60, 0.35) 45%,
+    rgba(200, 150, 60, 0) 100%
+  );
+}
