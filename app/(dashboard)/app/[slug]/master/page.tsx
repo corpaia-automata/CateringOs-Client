@@ -5,7 +5,7 @@ import { useRouter, useParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Plus, Search, Pencil, BookOpen, Check, X, Loader2,
-  Trash2, ToggleLeft, ToggleRight, ChefHat, Package, AlertCircle,
+  Trash2, ToggleLeft, ToggleRight, ChefHat, Package, AlertCircle, FileSpreadsheet, ChevronRight,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '@/lib/api';
@@ -17,6 +17,7 @@ interface Dish {
   id: string;
   name: string;
   category: string;
+  category_name?: string | null;
   dish_type: string;
   veg_non_veg: string;
   price_unit: string;
@@ -29,6 +30,36 @@ interface Dish {
   batch_unit?: string;
   recipe_count?: number;
   cost_per_unit?: string | number;
+}
+
+function isUuidLike(value?: string | null) {
+  if (!value) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+interface GlobalDishCategoryRow {
+  id: string;
+  name: string;
+}
+
+function normalizeDishCatLabel(s: string) {
+  return s.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+/** Map list row → category FK UUID for forms (`category` may be legacy text; `category_name` is read-only). */
+function dishCategoryIdForForm(dish: Dish | null, apiCats: GlobalDishCategoryRow[]): string {
+  if (!dish) return '';
+  const raw = (dish.category ?? '').trim();
+  if (isUuidLike(raw)) return raw;
+  if (!apiCats.length) return '';
+  const label = (dish.category_name ?? raw).trim();
+  if (!label) return '';
+  const key = normalizeDishCatLabel(label);
+  let hit = apiCats.find(c => normalizeDishCatLabel(c.name) === key);
+  if (hit) return hit.id;
+  const stripPlural = (x: string) => (x.endsWith('s') && x.length > 1 ? x.slice(0, -1) : x);
+  hit = apiCats.find(c => stripPlural(normalizeDishCatLabel(c.name)) === stripPlural(key));
+  return hit?.id ?? '';
 }
 
 interface Ingredient {
@@ -103,6 +134,32 @@ function ActiveBadge({ active }: { active: boolean }) {
     <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold"
       style={{ backgroundColor: active ? '#ECFDF5' : '#F1F5F9', color: active ? '#0D9488' : '#94A3B8' }}>
       {active ? 'Active' : 'Inactive'}
+    </span>
+  );
+}
+
+function DishTypeBadge({ value }: { value?: string }) {
+  const type = (value || '').toLowerCase();
+  const style = type === 'fixed_price'
+    ? { bg: '#DCFCE7', color: '#15803D', label: 'Fixed' }
+    : type === 'recipe'
+      ? { bg: '#EEF2FF', color: '#4338CA', label: 'Recipe' }
+      : { bg: '#FFF7ED', color: '#C2410C', label: 'Live Counter' };
+  return (
+    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold"
+      style={{ backgroundColor: style.bg, color: style.color }}>
+      {style.label}
+    </span>
+  );
+}
+
+function VegTypeBadge({ value }: { value?: string }) {
+  const isVeg = (value || '').toLowerCase() === 'veg';
+  return (
+    <span className="inline-flex items-center gap-1 text-xs font-semibold"
+      style={{ color: isVeg ? '#16A34A' : '#DC2626' }}>
+      <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: isVeg ? '#22C55E' : '#EF4444' }} />
+      {isVeg ? 'Veg' : 'Non-Veg'}
     </span>
   );
 }
@@ -189,6 +246,20 @@ const EMPTY_DISH = {
   unit_type: 'PLATE', is_active: true,
 };
 
+/** Align drawer fields with DishSerializer (`serving_unit`, not legacy `price_unit` / `unit_type`). */
+function servingUnitFromDrawerForm(priceUnit: string, unitType: string): string {
+  const fromPrice: Record<string, string> = {
+    per_plate: 'PLATE',
+    per_kg: 'KG',
+    per_piece: 'PIECE',
+  };
+  const pu = (priceUnit || '').toLowerCase();
+  if (fromPrice[pu]) return fromPrice[pu];
+  const ut = (unitType || 'PLATE').toUpperCase();
+  if (['PLATE', 'KG', 'PIECE', 'LITRE', 'PORTION'].includes(ut)) return ut;
+  return 'PLATE';
+}
+
 function DishDrawer({ open, onClose, editing, onSaved }: {
   open: boolean; onClose: () => void; editing: Dish | null; onSaved: () => void;
 }) {
@@ -196,11 +267,29 @@ function DishDrawer({ open, onClose, editing, onSaved }: {
   const [saving, setSaving] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const formRef = useRef<HTMLFormElement>(null);
+  const [dishCategories, setDishCategories] = useState<GlobalDishCategoryRow[]>([]);
+  const [dishCategoriesLoading, setDishCategoriesLoading] = useState(false);
 
   useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setDishCategoriesLoading(true);
+    api.get('/categories/')
+      .then((data: unknown) => {
+        if (cancelled) return;
+        const list = Array.isArray(data) ? (data as GlobalDishCategoryRow[]) : [];
+        setDishCategories([...list].sort((a, b) => a.name.localeCompare(b.name)));
+      })
+      .catch(() => { if (!cancelled) toast.error('Failed to load categories'); })
+      .finally(() => { if (!cancelled) setDishCategoriesLoading(false); });
+    return () => { cancelled = true; };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
     setForm(editing ? {
       name:          editing.name          ?? '',
-      category:      editing.category      ?? '',
+      category:      isUuidLike(editing.category) ? (editing.category ?? '') : '',
       dish_type:     editing.dish_type     ?? 'recipe',
       veg_non_veg:   editing.veg_non_veg   ?? 'veg',
       price_unit:    editing.price_unit    ?? 'per_plate',
@@ -211,6 +300,15 @@ function DishDrawer({ open, onClose, editing, onSaved }: {
     } : { ...EMPTY_DISH });
     setFieldErrors({});
   }, [editing, open]);
+
+  useEffect(() => {
+    if (!open || !editing || !dishCategories.length) return;
+    setForm(f => {
+      if (f.category) return f;
+      const id = dishCategoryIdForForm(editing, dishCategories);
+      return id ? { ...f, category: id } : f;
+    });
+  }, [editing, open, dishCategories]);
 
   function set(k: string, v: any) { setForm(f => ({ ...f, [k]: v })); setFieldErrors(e => ({ ...e, [k]: '' })); }
 
@@ -228,10 +326,21 @@ function DishDrawer({ open, onClose, editing, onSaved }: {
 
     setSaving(true);
     setFieldErrors({});
+    const { category: catId, price_unit, unit_type, ...rest } = form;
+    const payload: Record<string, unknown> = {
+      name:          rest.name.trim(),
+      dish_type:     rest.dish_type,
+      veg_non_veg:   rest.veg_non_veg,
+      base_price:    rest.base_price,
+      selling_price: rest.selling_price,
+      is_active:     rest.is_active,
+      serving_unit:  servingUnitFromDrawerForm(price_unit, unit_type),
+    };
+    if (catId) payload.category = catId;
     try {
       editing
-        ? await api.patch(`/master/dishes/${editing.id}/`, form)
-        : await api.post('/master/dishes/', form);
+        ? await api.patch(`/master/dishes/${editing.id}/`, payload)
+        : await api.post('/master/dishes/', payload);
       toast.success(editing ? 'Dish updated' : 'Dish created successfully');
       onSaved(); onClose();
     } catch (err: any) {
@@ -296,8 +405,10 @@ function DishDrawer({ open, onClose, editing, onSaved }: {
             <label className={lbl} style={{ color: '#0F172A' }}>Category</label>
             <select className={inp} style={fieldErrors.category ? ist_err : ist} value={form.category}
               onChange={e => set('category', e.target.value)}>
-              <option value="">Select</option>
-              {DISH_CATEGORIES.filter(c => c !== 'All').map(c => <option key={c} value={c}>{c}</option>)}
+              <option value="">{dishCategoriesLoading ? 'Loading…' : 'Select'}</option>
+              {dishCategories.map(c => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
             </select>
             <FieldError msg={fieldErrors.category} />
           </div>
@@ -556,7 +667,7 @@ function DishesTab() {
         <div className="flex items-center gap-2 px-3 py-2 rounded-lg flex-1 min-w-[180px]"
           style={{ border: '1.5px solid #E2E8F0', backgroundColor: '#F8FAFC' }}>
           <Search size={14} style={{ color: '#94A3B8' }} />
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search dishes…"
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search dishes..."
             className="bg-transparent outline-none text-sm flex-1" style={{ color: '#0F172A' }} />
           {search && <button onClick={() => setSearch('')}><X size={12} style={{ color: '#94A3B8' }} /></button>}
         </div>
@@ -575,20 +686,20 @@ function DishesTab() {
           </div>
           <span className="text-xs font-medium" style={{ color: '#64748B' }}>Active only</span>
         </label>
-        <button onClick={() => router.push(`/app/${slug}/master/create`)}
+        {/* <button onClick={() => router.push(`/app/${slug}/master/create`)}
           className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white ml-auto"
           style={{ backgroundColor: '#D95F0E' }}>
           <Plus size={15} /> Add Dish
-        </button>
+        </button> */}
       </div>
 
       {/* Table */}
       <div className="rounded-xl overflow-hidden" style={{ border: '1px solid #E2E8F0', backgroundColor: '#fff' }}>
-        <table className="w-full text-sm">
+        <table className="w-full text-sm ">
           <thead>
             <tr style={{ backgroundColor: '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}>
-              {['Dish Name', 'Category', 'Unit Type', 'Has Recipe', 'Active', 'Actions'].map(h => (
-                <th key={h} className="px-4 py-3 text-left text-xs font-semibold" style={{ color: '#64748B' }}>{h}</th>
+              {['', 'Dish Name', 'Category', 'Type', 'Dish Type', 'Cost / Sell Price', 'Actions'].map((h, idx) => (
+                <th key={h || 'icon-col'} className={`px-4 py-3 text-left text-xs font-semibold ${idx === 0 ? 'w-8' : ''}`} style={{ color: '#6B7280' }}>{h}</th>
               ))}
             </tr>
           </thead>
@@ -596,54 +707,58 @@ function DishesTab() {
             {isLoading ? (
               Array.from({ length: 8 }).map((_, i) => (
                 <tr key={i} style={{ borderBottom: '1px solid #F1F5F9' }}>
-                  {Array.from({ length: 6 }).map((_, j) => <td key={j} className="px-4 py-3"><Skeleton className="h-4 w-full" /></td>)}
+                  {Array.from({ length: 7 }).map((_, j) => <td key={j} className="px-4 py-3"><Skeleton className="h-4 w-full" /></td>)}
                 </tr>
               ))
             ) : dishes.length === 0 ? (
-              <tr><td colSpan={6} className="px-4 py-14 text-center">
+              <tr><td colSpan={7} className="px-4 py-14 text-center">
                 <ChefHat size={36} className="mx-auto mb-2 opacity-20" style={{ color: '#64748B' }} />
                 <p className="text-sm" style={{ color: '#94A3B8' }}>No dishes found</p>
               </td></tr>
             ) : dishes.map(dish => (
-              <tr key={dish.id} onClick={() => router.push(`/app/${slug}/master/dishes/${dish.id}`)} className="hover:bg-slate-50 transition-colors cursor-pointer" style={{ borderBottom: '1px solid #F1F5F9' }}>
-                <td className="px-4 py-3 font-medium" style={{ color: '#0F172A' }}>{dish.name}</td>
+              <tr key={dish.id} onClick={() => router.push(`/app/${slug}/master/dishes/${dish.id}`)} className="hover:bg-slate-50 transition-colors cursor-pointer group" style={{ borderBottom: '1px solid #F1F5F9' }}>
                 <td className="px-4 py-3">
-                  {dish.category ? (
-                    <span className="px-2 py-0.5 rounded-full text-xs font-medium"
-                      style={{ backgroundColor: '#F1F5F9', color: '#64748B' }}>{dish.category}</span>
-                  ) : <span style={{ color: '#94A3B8' }}>—</span>}
+                  <span className="inline-flex items-center justify-center w-7 h-7 rounded-md" style={{ backgroundColor: '#F3F4F6', color: '#9CA3AF' }}>
+                    <ChefHat size={12} />
+                  </span>
                 </td>
-                <td className="px-4 py-3 text-xs" style={{ color: '#64748B' }}>{dish.unit_type || '—'}</td>
+                <td className="px-4 py-3 font-medium" style={{ color: '#111827' }}>{dish.name}</td>
                 <td className="px-4 py-3">
-                  {dish.has_recipe
-                    ? <span className="flex items-center gap-1 text-xs font-medium" style={{ color: '#0D9488' }}>
-                        <Check size={13} />
-                        per {dish.batch_size ?? 1} {dish.batch_unit ?? dish.unit_type ?? 'KG'}
-                      </span>
-                    : <span className="flex items-center gap-1 text-xs" style={{ color: '#DC2626' }}>
-                        <X size={13} /> No recipe
-                      </span>}
+                  {(() => {
+                    const label = dish.category_name || (isUuidLike(dish.category) ? '' : dish.category);
+                    return label
+                      ? <span className="text-sm" style={{ color: '#64748B' }}>{label}</span>
+                      : <span style={{ color: '#94A3B8' }}>—</span>;
+                  })()}
                 </td>
-                <td className="px-4 py-3"><ActiveBadge active={dish.is_active} /></td>
                 <td className="px-4 py-3">
-                  <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                  <VegTypeBadge value={dish.veg_non_veg} />
+                </td>
+                <td className="px-4 py-3">
+                  <DishTypeBadge value={dish.dish_type} />
+                </td>
+                <td className="px-4 py-3">
+                  <div className="text-[10px] font-semibold uppercase" style={{ color: '#94A3B8' }}>
+                    {(dish.price_unit || '').replace('per_', 'PER ').replace('_', ' ').toUpperCase()}
+                  </div>
+                  <div className="text-sm font-semibold" style={{ color: '#111827' }}>
+                    ₹{Number(dish.base_price || 0).toLocaleString('en-IN')} <span style={{ color: '#94A3B8' }}>→</span>{' '}
+                    <span style={{ color: '#16A34A' }}>₹{Number(dish.selling_price || 0).toLocaleString('en-IN')}</span>
+                  </div>
+                </td>
+                <td className="px-4 py-3">
+                  <div className="flex items-center gap-2 text-slate-400" onClick={e => e.stopPropagation()}>
+                    {/* <button onClick={() => router.push(`/app/${slug}/master/dishes/${dish.id}`)}
+                      className="p-1 rounded hover:bg-slate-100" title="Open">
+                      <ChevronRight size={14} />
+                    </button> */}
                     <button onClick={() => { setEditingDish(dish); setDishDrawer(true); }}
-                      className="p-1.5 rounded-lg hover:bg-slate-100" title="Edit">
-                      <Pencil size={13} style={{ color: '#64748B' }} />
-                    </button>
-                    <button onClick={() => router.push(`/app/${slug}/master/dishes/${dish.id}`)}
-                      className="p-1.5 rounded-lg hover:bg-teal-50" title="View / Edit Recipe">
-                      <BookOpen size={14} style={{ color: '#0D9488' }} />
-                    </button>
-                    <button onClick={() => toggleActive(dish)}
-                      className="p-1.5 rounded-lg hover:bg-slate-100" title={dish.is_active ? 'Deactivate' : 'Activate'}>
-                      {dish.is_active
-                        ? <ToggleRight size={15} style={{ color: '#0D9488' }} />
-                        : <ToggleLeft size={15} style={{ color: '#94A3B8' }} />}
+                      className="p-1 rounded hover:bg-slate-100" title="Edit">
+                      <Pencil size={13} />
                     </button>
                     <button onClick={() => setDeletingDish(dish)}
-                      className="p-1.5 rounded-lg hover:bg-red-50" title="Delete">
-                      <Trash2 size={13} style={{ color: '#DC2626' }} />
+                      className="p-1 rounded hover:bg-red-50 hover:text-red-500" title="Delete">
+                      <Trash2 size={13} />
                     </button>
                   </div>
                 </td>
@@ -732,7 +847,7 @@ function IngredientsTab() {
         </select>
         <button onClick={() => { setEditing(null); setDrawerOpen(true); }}
           className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white ml-auto"
-          style={{ backgroundColor: '#D95F0E' }}>
+          style={{ backgroundColor: 'black' }}>
           <Plus size={15} /> Add Ingredient
         </button>
       </div>
@@ -814,25 +929,44 @@ type Tab = 'dishes' | 'ingredients';
 
 export default function MasterPage() {
   const [tab, setTab] = useState<Tab>('dishes');
+  const router = useRouter();
+  const { slug } = useParams<{ slug: string }>();
 
   return (
     <div className="flex flex-col gap-5">
-      <div>
-        <p className="text-sm mt-0.5" style={{ color: '#64748B' }}>Manage dishes, recipes, and ingredients</p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight" style={{ color: '#111827' }}>Dishes & Recipes</h1>
+          <p className="text-sm mt-0.5" style={{ color: '#6B7280' }}>Manage your culinary catalog and costs</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {/* <button
+            className="inline-flex items-center gap-2 px-4 py-2 rounded text-sm font-medium"
+            style={{ border: '1px solid #E5E7EB', color: '#374151', backgroundColor: '#fff' }}
+            onClick={() => toast('Bulk upload UI can be connected here')}>
+            <FileSpreadsheet size={14} /> Bulk Upload
+          </button> */}
+          <button
+            className="inline-flex items-center gap-2 px-4 py-2 rounded text-sm font-semibold text-white"
+            style={{ backgroundColor: '#111827' }}
+            onClick={() => router.push(`/app/${slug}/master/create`)}>
+            <Plus size={14} /> New Dish
+          </button>
+        </div>
       </div>
 
       <div className="flex border-b" style={{ borderColor: '#E2E8F0' }}>
         {([
           { key: 'dishes', label: 'Dishes', icon: ChefHat },
-          { key: 'ingredients', label: 'Ingredients', icon: Package },
+          { key: 'ingredients', label: 'Sub Items (Ingredients)', icon: Package },
         ] as const).map(({ key, label, icon: Icon }) => (
           <button key={key} onClick={() => setTab(key)}
             className="flex items-center gap-2 px-5 py-3 text-sm font-medium transition-colors relative"
-            style={{ color: tab === key ? '#D95F0E' : '#64748B' }}>
+            style={{ color: tab === key ? 'black' : 'gray-500' }}>
             <Icon size={15} />
             {label}
             {tab === key && (
-              <div className="absolute bottom-0 left-0 right-0 h-0.5 rounded-t-full" style={{ backgroundColor: '#D95F0E' }} />
+              <div className="absolute bottom-0 left-0 right-0 h-0.5 rounded-t-full" style={{ backgroundColor: 'black' }} />
             )}
           </button>
         ))}

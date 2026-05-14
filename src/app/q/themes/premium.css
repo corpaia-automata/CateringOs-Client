@@ -1,0 +1,139 @@
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500;600&family=DM+Sans:wght@400;500;600;700&display=swap');
+
+/**
+ * Premium quotation theme — card grid menu, airy layout, highlighted pricing.
+ * Branding colors overridden via inline style from API when rendering.
+ */
+
+:root {
+  --q-primary: #0f1c2e;
+  --q-accent: #c9a84c;
+  --q-font-heading: 'Cormorant Garamond', serif;
+  --q-font-body: 'DM Sans', sans-serif;
+  --q-spacing-unit: 3rem;
+  --q-border-radius: 12px;
+  --q-muted: color-mix(in srgb, var(--q-primary) 40%, white);
+}
+
+.q-cover,
+.q-about,
+.q-why-us,
+.q-event-details,
+.q-menu,
+.q-services,
+.q-pricing,
+.q-terms {
+  font-family: var(--q-font-body);
+  color: var(--q-primary);
+  padding: calc(var(--q-spacing-unit) * 0.85) 0;
+  margin: 0;
+}
+
+.q-section-title {
+  font-family: var(--q-font-heading);
+  font-weight: 300;
+  font-size: clamp(1.85rem, 4.5vw, 2.75rem);
+  letter-spacing: 0.02em;
+  color: var(--q-primary);
+  margin: 0 0 calc(var(--q-spacing-unit) * 0.65);
+  line-height: 1.15;
+}
+
+.q-section-body {
+  font-size: 1rem;
+  line-height: 1.75;
+  color: var(--q-primary);
+  max-width: 65ch;
+}
+
+.q-cover {
+  min-height: 48vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: calc(var(--q-spacing-unit) * 1.1);
+  background: radial-gradient(
+    ellipse 120% 80% at 50% 0%,
+    color-mix(in srgb, var(--q-accent) 18%, white),
+    color-mix(in srgb, var(--q-primary) 8%, white) 55%,
+    white
+  );
+  border-radius: var(--q-border-radius);
+}
+
+.q-menu {
+  display: block;
+}
+
+.q-menu .q-card-grid,
+.q-menu > .q-card-wrapper {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.25rem;
+}
+
+@media (max-width: 640px) {
+  .q-menu .q-card-grid,
+  .q-menu > .q-card-wrapper {
+    grid-template-columns: 1fr;
+  }
+}
+
+.q-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.q-table th,
+.q-table td {
+  padding: 0.65rem 0;
+  text-align: left;
+  border-bottom: 1px solid color-mix(in srgb, var(--q-primary) 10%, white);
+}
+
+.q-card {
+  border: none;
+  border-radius: var(--q-border-radius);
+  padding: 1.35rem 1.5rem;
+  background: color-mix(in srgb, var(--q-primary) 4%, white);
+  box-shadow: 0 8px 28px color-mix(in srgb, var(--q-primary) 8%, transparent);
+}
+
+.q-badge-complimentary {
+  display: inline-block;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.25rem 0.55rem;
+  border-radius: 999px;
+  background: var(--q-accent);
+  color: var(--q-primary);
+}
+
+.q-pricing {
+  padding: calc(var(--q-spacing-unit) * 0.5) 0;
+}
+
+.q-pricing .q-section-body,
+.q-pricing .q-price-highlight {
+  padding: 1.5rem 1.75rem;
+  border-radius: var(--q-border-radius);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--q-accent) 35%, white) 0%,
+    color-mix(in srgb, var(--q-accent) 15%, white) 100%
+  );
+  border: 1px solid color-mix(in srgb, var(--q-accent) 40%, white);
+}
+
+.q-price-total {
+  font-family: var(--q-font-heading);
+  font-size: 2rem;
+  font-weight: 500;
+  color: var(--q-primary);
+  margin-top: 0.5rem;
+}

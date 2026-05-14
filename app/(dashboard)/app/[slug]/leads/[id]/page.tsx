@@ -14,6 +14,7 @@ import toast from 'react-hot-toast';
 import { api } from '@/lib/api';
 import { EVENT_TYPES } from '@/lib/constants';
 import { Skeleton } from '@/components/ui/skeleton';
+import { parseGuestCount } from '@/lib/utils';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -39,6 +40,7 @@ interface LeadDetail {
   estimated_budget?: string | number;
   status: string;
   source_channel?: string;
+  venue?: string;
   notes?: string;
   created_at: string;
   updated_at: string;
@@ -58,6 +60,7 @@ interface InquiryQuotation {
   id: string;
   version_number: number;
   status: string;
+  is_locked?: boolean;
   menu_total: string | number | null;
   internal_cost: string | number | null;
   quoted_price: string | number | null;
@@ -68,10 +71,9 @@ interface InquiryQuotation {
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
 const STATUS_CONFIG: Record<string, { bg: string; color: string; dot: string; label: string; step: number }> = {
-  NEW:       { bg: '#EFF6FF', color: '#3B82F6', dot: '#3B82F6', label: 'New',       step: 0 },
-  QUALIFIED: { bg: '#F5F3FF', color: '#7C3AED', dot: '#7C3AED', label: 'Qualified', step: 1 },
-  FOLLOW_UP: { bg: '#FFF7ED', color: '#F97316', dot: '#F97316', label: 'Follow Up', step: 2 },
-  REJECTED:  { bg: '#FEF2F2', color: '#DC2626', dot: '#DC2626', label: 'Rejected',  step: -1 },
+  PLANNING: { bg: '#FFF7ED', color: '#F97316', dot: '#F97316', label: 'Planning', step: 0 },
+  SUCCESS:  { bg: '#ECFDF5', color: '#16A34A', dot: '#16A34A', label: 'Success',  step: 1 },
+  LOST:     { bg: '#FEF2F2', color: '#DC2626', dot: '#DC2626', label: 'Lost',     step: -1 },
 };
 
 const QUOTATION_STATUS_STYLE: Record<string, { bg: string; color: string }> = {
@@ -82,10 +84,9 @@ const QUOTATION_STATUS_STYLE: Record<string, { bg: string; color: string }> = {
 };
 
 const VALID_TRANSITIONS: Record<string, string[]> = {
-  NEW:       ['QUALIFIED', 'FOLLOW_UP', 'REJECTED'],
-  QUALIFIED: ['FOLLOW_UP', 'REJECTED'],
-  FOLLOW_UP: ['QUALIFIED', 'REJECTED'],
-  REJECTED:  ['NEW'],
+  PLANNING: ['SUCCESS', 'LOST'],
+  SUCCESS:  [],
+  LOST:     ['PLANNING'],
 };
 
 const SOURCE_CHANNELS: Record<string, string> = {
@@ -100,7 +101,7 @@ const SOURCE_CHANNEL_OPTIONS = [
   { label: 'Walk In',    value: 'WALK_IN' },
 ];
 
-const PIPELINE_STEPS = ['NEW', 'QUALIFIED', 'FOLLOW_UP'];
+const PIPELINE_STEPS = ['PLANNING', 'SUCCESS'];
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -243,9 +244,10 @@ function EditLeadDrawer({ lead, open, onClose, onSaved }: {
     source_channel:   lead.source_channel ?? 'PHONE_CALL',
     event_type:       lead.event_type ?? '',
     tentative_date:   lead.tentative_date ?? '',
-    guest_count:      String(lead.guest_count ?? ''),
+    guest_count:      lead.guest_count != null ? String(parseGuestCount(lead.guest_count)) : '',
     estimated_budget: String(lead.estimated_budget ?? ''),
     status:           lead.status,
+    venue:            lead.venue ?? '',
     notes:            lead.notes ?? '',
   });
   const [saving, setSaving] = useState(false);
@@ -260,9 +262,10 @@ function EditLeadDrawer({ lead, open, onClose, onSaved }: {
         source_channel:   lead.source_channel ?? 'PHONE_CALL',
         event_type:       lead.event_type ?? '',
         tentative_date:   lead.tentative_date ?? '',
-        guest_count:      String(lead.guest_count ?? ''),
+        guest_count:      lead.guest_count != null ? String(parseGuestCount(lead.guest_count)) : '',
         estimated_budget: String(lead.estimated_budget ?? ''),
         status:           lead.status,
+        venue:            lead.venue ?? '',
         notes:            lead.notes ?? '',
       });
     }
@@ -290,9 +293,10 @@ function EditLeadDrawer({ lead, open, onClose, onSaved }: {
         source_channel:   form.source_channel,
         event_type:       form.event_type || '',
         tentative_date:   form.tentative_date || null,
-        guest_count:      form.guest_count ? parseInt(form.guest_count) : 1,
+        guest_count:      parseGuestCount(form.guest_count),
         estimated_budget: form.estimated_budget || null,
         status:           form.status,
+        venue:            form.venue?.trim() || '',
         notes:            form.notes || '',
       });
       toast.success('Lead updated');
@@ -415,10 +419,19 @@ function EditLeadDrawer({ lead, open, onClose, onSaved }: {
                 onFocus={e => (e.currentTarget.style.borderColor = '#D95F0E')}
                 onBlur={e => (e.currentTarget.style.borderColor = '#E2E8F0')}
                 >
-                {['NEW', 'QUALIFIED', 'FOLLOW_UP', 'REJECTED'].map(s =>
+                {['PLANNING', 'SUCCESS', 'LOST'].map(s =>
                   <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
               </select>
             </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold mb-1.5" style={{ color: '#475569' }}>Venue</label>
+            <input className={inp} style={ist} value={form.venue}
+              onChange={e => set('venue', e.target.value)}
+              placeholder="Venue / hall name"
+              onFocus={e => (e.currentTarget.style.borderColor = '#D95F0E')}
+              onBlur={e => (e.currentTarget.style.borderColor = '#E2E8F0')} />
           </div>
 
           <div>
@@ -586,12 +599,26 @@ export default function LeadDetailPage() {
     if (!lead) return;
     setMarkingLost(true);
     try {
-      await api.patch(`/inquiries/${lead.id}/`, { status: 'REJECTED' });
+      await api.patch(`/inquiries/${lead.id}/`, { status: 'LOST' });
       toast.success('Marked as lost');
       qc.invalidateQueries({ queryKey: ['lead', id] });
     } catch {
       toast.error('Failed to update status');
     } finally { setMarkingLost(false); }
+  }
+
+  async function handleGoToPricing() {
+    if (!lead) return;
+    try {
+      if (!latestInquiryQuotation) {
+        await api.post('/quotations/', { inquiry: lead.id });
+        await refetchInquiryQuotations();
+      }
+      setActiveTab('pricing');
+    } catch (err: unknown) {
+      const e = err as { data?: { detail?: string } };
+      toast.error(e?.data?.detail ?? 'Failed to open pricing');
+    }
   }
 
   async function handleConvert() {
@@ -609,12 +636,15 @@ export default function LeadDetailPage() {
   }
 
   async function handleReviseQuotation() {
-    if (!lead) return;
+    if (!latestInquiryQuotation?.id) return;
     setRevisingQuotation(true);
     try {
-      await api.post('/quotations/', { inquiry_id: lead.id, status: 'DRAFT' });
+      await api.post(`/quotations/${latestInquiryQuotation.id}/revise/`, {});
       toast.success('New revision created');
-      await refetchInquiryQuotations();
+      await Promise.all([
+        refetchInquiryQuotations(),
+        qc.invalidateQueries({ queryKey: ['lead', id] }),
+      ]);
       setActiveTab('overview');
     } catch (err: unknown) {
       const e = err as { data?: { detail?: string } };
@@ -653,6 +683,14 @@ export default function LeadDetailPage() {
   }
 
   const timeline = buildTimeline(lead);
+  const latestInquiryQuotationStatus = String(latestInquiryQuotation?.status ?? 'DRAFT').toUpperCase();
+  const latestQuoteVersion = latestInquiryQuotation?.version_number ?? 1;
+  const nextRevision = latestQuoteVersion + 1;
+  const isLatestQuoteFinalized = Boolean(latestInquiryQuotation?.is_locked)
+    || ['SENT', 'ACCEPTED'].includes(latestInquiryQuotationStatus);
+  const isLatestQuoteDraft = !isLatestQuoteFinalized;
+  const isQuotationReadyToConvert = isLatestQuoteFinalized && lead.status === 'PLANNING';
+  const planningLabel = latestQuoteVersion > 1 ? `Planning - Rev. ${latestQuoteVersion}` : 'Planning';
   const budgetPerPlate = lead.estimated_budget && lead.guest_count && lead.guest_count > 0
     ? Math.round((typeof lead.estimated_budget === 'string' ? parseFloat(lead.estimated_budget) : lead.estimated_budget) / lead.guest_count)
     : null;
@@ -661,7 +699,7 @@ export default function LeadDetailPage() {
     : null;
   const showBudgetAlert = budgetPerPlate !== null && latestPerPlate !== null && latestPerPlate !== budgetPerPlate;
   const eventGuests = lead.converted_event?.guest_count ?? lead.guest_count;
-  const cfg = STATUS_CONFIG[lead.status] ?? STATUS_CONFIG['NEW'];
+  const cfg = STATUS_CONFIG[lead.status] ?? STATUS_CONFIG['PLANNING'];
   const currentPipelineStep = cfg.step ?? 0;
 
   return (
@@ -725,7 +763,7 @@ export default function LeadDetailPage() {
                     {initials(lead.customer_name)}
                   </div>
                   <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-2 border-white"
-                    style={{ backgroundColor: lead.status === 'REJECTED' ? '#DC2626' : '#F97316' }} />
+                    style={{ backgroundColor: lead.status === 'LOST' ? '#DC2626' : '#F97316' }} />
                 </div>
 
                 <div className="flex-1 min-w-0">
@@ -786,7 +824,7 @@ export default function LeadDetailPage() {
             </div>
 
             {/* Pipeline Progress */}
-            {lead.status !== 'REJECTED' && (
+            {lead.status !== 'LOST' && (
               <div className="flex items-center gap-0 pb-0 -mb-px overflow-x-auto">
                 {PIPELINE_STEPS.map((step, idx) => {
                   const sc = STATUS_CONFIG[step];
@@ -827,12 +865,12 @@ export default function LeadDetailPage() {
                 })}
               </div>
             )}
-            {lead.status === 'REJECTED' && (
+            {lead.status === 'LOST' && (
               <div className="flex items-center gap-2 px-4 py-3 mb-0"
                 style={{ backgroundColor: 'rgba(220,38,38,0.1)', borderTop: '1px solid rgba(220,38,38,0.2)' }}>
                 <AlertCircle size={14} style={{ color: '#F87171' }} />
                 <span className="text-xs font-semibold" style={{ color: '#F87171' }}>
-                  This lead has been marked as Rejected
+                  This lead has been marked as Lost
                 </span>
               </div>
             )}
@@ -952,7 +990,7 @@ export default function LeadDetailPage() {
                   { label: 'Event Type', value: lead.event_type || '—', icon: Star },
                   { label: 'Guest Count', value: lead.guest_count ? `${lead.guest_count} Pax` : '—', icon: Users },
                   { label: 'Event Date', value: fmtDate(lead.converted_event?.event_date ?? lead.tentative_date), icon: Calendar },
-                  { label: 'Venue', value: lead.converted_event?.venue || '—', icon: MapPin },
+                  { label: 'Venue', value: lead.venue?.trim() || lead.converted_event?.venue || '—', icon: MapPin },
                   { label: 'Client Budget', value: fmtINR(lead.estimated_budget), icon: IndianRupee },
                   { label: 'Budget / Plate', value: budgetPerPlate ? `₹${budgetPerPlate.toLocaleString('en-IN')}` : '—', icon: IndianRupee },
                 ].map(({ label, value, icon: Icon }) => (
@@ -1149,16 +1187,16 @@ export default function LeadDetailPage() {
                 <h2 className="text-sm font-bold" style={{ color: '#0F172A' }}>Actions</h2>
               </div>
               <div className="p-4 flex flex-col gap-2">
-                {latestInquiryQuotation?.status === 'DRAFT' ? (
+                {isLatestQuoteDraft && lead.status === 'PLANNING' ? (
                   <>
                     <div className="flex items-start gap-2.5 p-3 rounded-xl mb-1" style={{ backgroundColor: '#FFFBEB', border: '1px solid #FDE68A' }}>
                       <span className="text-base leading-none mt-0.5">⏰</span>
                       <div>
-                        <p className="text-xs font-bold" style={{ color: '#92400E' }}>Planning · Rev. {latestInquiryQuotation.version_number}</p>
+                        <p className="text-xs font-bold" style={{ color: '#92400E' }}>{planningLabel}</p>
                         <p className="text-xs mt-0.5" style={{ color: '#B45309' }}>Edit menu, costing & pricing freely</p>
                       </div>
                     </div>
-                    <button onClick={() => setActiveTab('pricing')}
+                    <button onClick={() => void handleGoToPricing()}
                       className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-bold text-white transition-all"
                       style={{ backgroundColor: '#3B82F6' }}>
                       $ Go to Pricing & Quote
@@ -1170,7 +1208,7 @@ export default function LeadDetailPage() {
                       ✕ Mark as Lost
                     </button>
                   </>
-                ) : latestInquiryQuotation?.status === 'SENT' ? (
+                ) : isQuotationReadyToConvert ? (
                   <>
                     <div className="flex items-start gap-2.5 p-3 rounded-xl mb-1" style={{ backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0' }}>
                       <span className="text-base leading-none mt-0.5">🔒</span>
@@ -1189,7 +1227,7 @@ export default function LeadDetailPage() {
                       className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold transition-all"
                       style={{ color: '#7C3AED', border: '1.5px solid #7C3AED', backgroundColor: 'transparent', opacity: revisingQuotation ? 0.7 : 1 }}>
                       {revisingQuotation && <Loader2 size={14} className="animate-spin" />}
-                      ↺ Revise Quotation — Rev. {(latestInquiryQuotation.version_number ?? 0) + 1}
+                      ↺ Revise Quotation → Rev. {nextRevision}
                     </button>
                     <button onClick={handleMarkLost} disabled={markingLost}
                       className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold transition-all"

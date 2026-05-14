@@ -6,15 +6,17 @@ import { useParams, useRouter } from 'next/navigation';
 import {
   ArrowLeft, Pencil, Trash2, Plus, Phone, Mail,
   ChevronDown, Loader2,
-  X, Lock, RotateCcw,
+  X, Lock, RotateCcw, AlertTriangle,
   MessageSquare, UserPlus, Zap, Star, Clock, Bell, TrendingUp,
   PhoneCall, CheckCircle, ArrowRight, Activity, Flame,
+  ChefHat, Calculator, ShoppingCart, IndianRupee, Download, ExternalLink,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { api } from '@/lib/api';
+import { ApiError, api } from '@/lib/api';
 import { EVENT_TYPES } from '@/lib/constants';
 import QuotationCard from './QuotationCard';
 import LeadStatusStepper from './LeadStatusStepper';
+import { LeadFormDrawer } from '@/components/leads/LeadFormDrawer';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -30,6 +32,10 @@ interface LeadDetail {
   status: string;
   source_channel?: string;
   notes?: string;
+  venue?: string;
+  event_id?: string | null;
+  converted_event_id?: string | null;
+  converted_event_status?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -43,6 +49,65 @@ interface LeadQuotationSummary {
   internal_cost?: number | string | null;
   advance_amount?: number | string | null;
   payment_terms?: string;
+}
+
+interface EventDetail {
+  id: string;
+  event_code?: string;
+  event_id?: string;
+  event_name?: string;
+  client_name?: string;
+  event_type?: string;
+  event_date?: string;
+  venue?: string;
+  guest_count?: number;
+  status?: string;
+  total_amount?: string | number;
+  advance_amount?: string | number;
+  balance_amount?: string | number;
+  food_cost?: string | number;
+  labor_cost?: string | number;
+  other_costs?: string | number;
+  created_at?: string;
+}
+
+interface EventSnapshotResponse {
+  event_details?: EventDetail;
+  menu_snapshot?: unknown;
+  services_snapshot?: unknown;
+  costing_snapshot?: unknown;
+  grocery_snapshot?: unknown;
+  pricing_snapshot?: Record<string, unknown> | null;
+}
+
+type AnyRecord = Record<string, unknown>;
+
+interface SnapshotMenuItem {
+  id: string;
+  name: string;
+  category: string;
+  qty: number | string;
+  price: number | string | null;
+  total: number | string | null;
+}
+
+interface SnapshotCostingItem {
+  id: string;
+  ingredient: string;
+  dishName: string;
+  category: string;
+  qty: number | string;
+  unit: string;
+  rate: number | string | null;
+  total: number | string | null;
+}
+
+interface SnapshotGroceryItem {
+  id: string;
+  ingredient: string;
+  quantity: number | string;
+  unit: string;
+  category: string;
 }
 
 // ─── Design Tokens ─────────────────────────────────────────────────────────────
@@ -76,34 +141,22 @@ const C = {
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
 const STATUS_CONFIG: Record<string, { color: string; bg: string; label: string; glow: string }> = {
-  PLANNING:  { color: C.orange, bg: C.orangeDim, label: 'Planning',  glow: 'rgba(249,115,22,0.25)' },
-  NEW:       { color: C.blue,   bg: C.blueDim,   label: 'New',       glow: 'rgba(59,130,246,0.25)' },
-  QUALIFIED: { color: C.purple, bg: C.purpleDim, label: 'Qualified', glow: 'rgba(139,92,246,0.25)' },
-  FOLLOW_UP: { color: C.yellow, bg: C.yellowDim, label: 'Follow Up', glow: 'rgba(234,179,8,0.25)' },
-  QUOTED:    { color: C.blue,   bg: C.blueDim,   label: 'Quoted',    glow: 'rgba(59,130,246,0.25)' },
-  CONFIRMED: { color: C.green,  bg: C.greenDim,  label: 'Confirmed', glow: 'rgba(34,197,94,0.25)' },
-  REJECTED:  { color: C.red,    bg: C.redDim,    label: 'Rejected',  glow: 'rgba(239,68,68,0.25)' },
+  PLANNING: { color: C.orange, bg: C.orangeDim, label: 'Planning', glow: 'rgba(249,115,22,0.25)' },
+  SUCCESS:  { color: C.green,  bg: C.greenDim,  label: 'Success',  glow: 'rgba(34,197,94,0.25)' },
+  LOST:     { color: C.red,    bg: C.redDim,    label: 'Lost',     glow: 'rgba(239,68,68,0.25)' },
 };
 
 const LEAD_TEMP: Record<string, { icon: typeof Flame; color: string; label: string }> = {
-  PLANNING:  { icon: Flame,  color: C.orange, label: 'Planning' },
-  NEW:       { icon: Flame,  color: C.blue,   label: 'New Lead' },
-  QUALIFIED: { icon: Star,   color: C.purple, label: 'Warm Lead' },
-  FOLLOW_UP: { icon: Flame,  color: C.orange, label: 'Hot Lead' },
-  QUOTED:    { icon: Star,   color: C.blue,   label: 'Quoted' },
-  CONFIRMED: { icon: CheckCircle, color: C.green, label: 'Confirmed' },
-  REJECTED:  { icon: X,      color: C.red,    label: 'Rejected' },
+  PLANNING: { icon: Flame, color: C.orange, label: 'Planning' },
+  SUCCESS:  { icon: CheckCircle, color: C.green, label: 'Success' },
+  LOST:     { icon: X, color: C.red, label: 'Lost' },
 };
 
 
 const VALID_TRANSITIONS: Record<string, string[]> = {
-  PLANNING:  ['QUOTED', 'REJECTED'],
-  NEW:       ['QUALIFIED', 'FOLLOW_UP', 'REJECTED'],
-  QUALIFIED: ['FOLLOW_UP', 'REJECTED'],
-  FOLLOW_UP: ['QUALIFIED', 'REJECTED'],
-  QUOTED:    ['CONFIRMED', 'REJECTED', 'PLANNING'],
-  CONFIRMED: [],
-  REJECTED:  ['NEW'],
+  PLANNING: ['SUCCESS', 'LOST'],
+  SUCCESS:  [],
+  LOST:     ['PLANNING'],
 };
 
 const SOURCE_CHANNELS: Record<string, string> = {
@@ -111,12 +164,6 @@ const SOURCE_CHANNELS: Record<string, string> = {
   WHATSAPP:   'WhatsApp',
   WALK_IN:    'Walk In',
 };
-
-const SOURCE_CHANNEL_OPTIONS = [
-  { label: 'Phone Call', value: 'PHONE_CALL' },
-  { label: 'WhatsApp',   value: 'WHATSAPP'   },
-  { label: 'Walk In',    value: 'WALK_IN'    },
-];
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -132,11 +179,32 @@ function fmtDateTime(d?: string) {
     ' • ' + dt.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase();
 }
 
+function fmtINR(v?: string | number | null) {
+  if (v == null || v === '') return '₹0';
+  const n = typeof v === 'string' ? parseFloat(v) : v;
+  if (isNaN(n)) return '₹0';
+  return '₹' + n.toLocaleString('en-IN', { maximumFractionDigits: 0 });
+}
+
 function initials(name: string) {
   const parts = name.trim().split(' ');
   if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
   return name.slice(0, 2).toUpperCase();
 }
+
+function getApiErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof ApiError) {
+    const data = error.data;
+    if (data && typeof data === 'object') {
+      const record = data as Record<string, unknown>;
+      const detail = record.error ?? record.detail;
+      if (typeof detail === 'string') return detail;
+    }
+  }
+  return fallback;
+}
+
+const EXISTING_EVENT_SENTINEL = 'event-already-created';
 
 // ─── Activity Timeline Builder ─────────────────────────────────────────────────
 
@@ -160,6 +228,94 @@ function buildTimeline(lead: LeadDetail): ActivityItem[] {
   createdDate.setMinutes(createdDate.getMinutes() + 1);
   items.push({ id: 'created', type: 'created', title: 'Lead created in system', date: createdDate.toISOString(), by: 'Staff' });
   return items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+}
+
+function asRecord(value: unknown): AnyRecord | null {
+  return value && typeof value === 'object' ? (value as AnyRecord) : null;
+}
+
+function parseSnapshot(snapshot: unknown): unknown {
+  if (typeof snapshot !== 'string') return snapshot;
+  try {
+    return JSON.parse(snapshot);
+  } catch {
+    return snapshot;
+  }
+}
+
+function snapshotRows(snapshot: unknown): AnyRecord[] {
+  const parsed = parseSnapshot(snapshot);
+  const rows = Array.isArray(parsed)
+    ? parsed
+    : parsed && typeof parsed === 'object' && 'items' in parsed
+      ? ((parsed as { items?: unknown[] }).items ?? [])
+      : [];
+  return rows.filter((row): row is AnyRecord => Boolean(row && typeof row === 'object'));
+}
+
+function normalizeMenuSnapshot(snapshot: unknown): SnapshotMenuItem[] {
+  return snapshotRows(snapshot).map((item, index) => ({
+    id: String(item.id ?? `menu-${index}`),
+    name: String(item.dish_name_snapshot ?? item.dish_name ?? item.dish ?? item.name ?? 'Dish'),
+    category: String(item.category ?? item.dish_category ?? 'Other'),
+    qty: (item.quantity ?? item.qty ?? item.pax ?? 0) as number | string,
+    price: (item.price_per_plate ?? item.selling_price ?? item.rate ?? item.price ?? null) as number | string | null,
+    total: (item.total ?? item.line_total ?? item.total_price ?? item.subtotal ?? item.amount ?? null) as number | string | null,
+  }));
+}
+
+function normalizeCostingSnapshot(snapshot: unknown): SnapshotCostingItem[] {
+  return snapshotRows(snapshot).map((item, index) => {
+    const qty = (item.quantity ?? item.qty ?? 0) as number | string;
+    const rate = (item.rate ?? item.unit_rate ?? item.price ?? null) as number | string | null;
+    const computedTotal = Number(qty) * Number(rate ?? 0);
+    return {
+      id: String(item.id ?? `cost-${index}`),
+      ingredient: String(item.ingredient_name ?? item.name ?? 'Ingredient'),
+      dishName: String(item.dish_name ?? item.dishName ?? item.dish ?? 'General'),
+      category: String(item.category ?? 'Other'),
+      qty,
+      unit: String(item.unit ?? ''),
+      rate,
+      total: (item.total ?? item.line_total ?? item.amount ?? (Number.isFinite(computedTotal) ? computedTotal : null)) as number | string | null,
+    };
+  });
+}
+
+function normalizeGrocerySnapshot(snapshot: unknown): SnapshotGroceryItem[] {
+  return snapshotRows(snapshot).map((item, index) => ({
+    id: String(item.id ?? item.ingredientId ?? `grocery-${index}`),
+    ingredient: String(item.ingredient_name ?? item.name ?? 'Item'),
+    quantity: (item.total_quantity ?? item.quantity ?? item.qty ?? 0) as number | string,
+    unit: String(item.unit ?? ''),
+    category: String(item.category ?? 'Other'),
+  }));
+}
+
+function resolveEventPayload(raw: unknown) {
+  const root = asRecord(raw) ?? {};
+  const nested = asRecord(root.data) ?? asRecord(root.result) ?? asRecord(root.payload) ?? root;
+  const snapshots = asRecord(nested.snapshots) ?? {};
+  const event =
+    (nested.event_details as EventDetail | undefined) ??
+    (nested.event as EventDetail | undefined) ??
+    (nested.event_data as EventDetail | undefined) ??
+    (nested.id ? (nested as unknown as EventDetail) : null);
+
+  const menuSnapshot = parseSnapshot(nested.menu_snapshot ?? snapshots.menu_snapshot ?? snapshots.menu ?? nested.menu ?? nested.menu_items ?? null);
+  const servicesSnapshot = parseSnapshot(nested.services_snapshot ?? snapshots.services_snapshot ?? nested.services ?? null);
+  const costingSnapshot = parseSnapshot(nested.costing_snapshot ?? snapshots.costing_snapshot ?? snapshots.costing ?? nested.costing ?? nested.cost_items ?? null);
+  const grocerySnapshot = parseSnapshot(nested.grocery_snapshot ?? snapshots.grocery_snapshot ?? snapshots.grocery ?? nested.grocery ?? nested.grocery_items ?? null);
+  const pricingSnapshot = parseSnapshot(
+    nested.pricing_snapshot ??
+    snapshots.pricing_snapshot ??
+    snapshots.pricing ??
+    nested.payment_snapshot ??
+    nested.pricing ??
+    null,
+  ) as AnyRecord | null;
+
+  return { event, menuSnapshot, servicesSnapshot, costingSnapshot, grocerySnapshot, pricingSnapshot };
 }
 
 // ─── Skeleton ──────────────────────────────────────────────────────────────────
@@ -195,6 +351,129 @@ function Card({ children, className = '', style = {} }: { children: React.ReactN
     <div className={`rounded-2xl p-6 ${className}`}
       style={{ backgroundColor: C.card, border: `1px solid ${C.border}`, ...style }}>
       {children}
+    </div>
+  );
+}
+
+function EmptySnapshot({ label }: { label: string }) {
+  return <p className="text-sm text-slate-500 py-6 text-center">No {label} found for this confirmed event.</p>;
+}
+
+function SnapshotTable({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
+      <table className="w-full min-w-[640px] text-sm">{children}</table>
+    </div>
+  );
+}
+
+function ConfirmedEventDetails({
+  rawEventData,
+  loading,
+  eventId,
+  onOpenEvent,
+  onDownloadQuotation,
+}: {
+  rawEventData?: EventSnapshotResponse;
+  loading: boolean;
+  eventId: string;
+  onOpenEvent: () => void;
+  onDownloadQuotation: () => void;
+}) {
+  const resolved = resolveEventPayload(rawEventData);
+  const event = resolved.event;
+  const menuRows = [
+    ...normalizeMenuSnapshot(resolved.menuSnapshot),
+    ...normalizeMenuSnapshot(resolved.servicesSnapshot),
+  ];
+  const costingRows = normalizeCostingSnapshot(resolved.costingSnapshot);
+  const groceryRows = normalizeGrocerySnapshot(resolved.grocerySnapshot);
+  const pricing = resolved.pricingSnapshot ?? {};
+  const totalAmount = Number(pricing.final_selling_price ?? pricing.selling_price ?? event?.total_amount ?? 0);
+  const paidAmount = Number(pricing.advance_amount ?? event?.advance_amount ?? 0);
+  const balanceAmount = Number(pricing.balance_amount ?? event?.balance_amount ?? Math.max(0, totalAmount - paidAmount));
+  const internalCost = Number(
+    pricing.total_cost ??
+    pricing.cost ??
+    (Number(event?.food_cost ?? 0) + Number(event?.labor_cost ?? 0) + Number(event?.other_costs ?? 0)),
+  );
+
+  return (
+    <div className="rounded-2xl border border-emerald-200 bg-white overflow-hidden">
+      <div className="flex items-start justify-between gap-4 flex-wrap px-5 py-4 border-b border-emerald-100 bg-emerald-50">
+        <div>
+          <p className="text-xs font-bold text-emerald-700 uppercase tracking-wide">Converted Event Details</p>
+          <h2 className="text-2xl font-bold text-slate-900 mt-1">{event?.event_name || event?.client_name || 'Confirmed Event'}</h2>
+          <p className="text-sm text-slate-600 mt-1">
+            {event?.event_code ?? event?.event_id ?? eventId} • {event?.status ?? 'Confirmed'}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={onDownloadQuotation}
+            className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-white px-3 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-50">
+            <Download size={15} /> Quotation
+          </button>
+          <button type="button" onClick={onOpenEvent}
+            className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700">
+            <ExternalLink size={15} /> Open Event
+          </button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="p-5 flex flex-col gap-3">
+          <div className="h-24 rounded-xl bg-slate-100 animate-pulse" />
+          <div className="h-40 rounded-xl bg-slate-100 animate-pulse" />
+        </div>
+      ) : (
+        <div className="p-5 flex flex-col gap-5">
+          <div className="grid gap-3 md:grid-cols-4">
+            {[
+              { label: 'Event Value', value: fmtINR(totalAmount), icon: IndianRupee },
+              { label: 'Internal Cost', value: fmtINR(internalCost), icon: Calculator },
+              { label: 'Paid', value: fmtINR(paidAmount), icon: CheckCircle },
+              { label: 'Balance', value: fmtINR(balanceAmount), icon: Clock },
+            ].map(({ label, value, icon: Icon }) => (
+              <div key={label} className="rounded-2xl border border-slate-200 p-4">
+                <div className="flex items-center gap-2 text-slate-500 text-sm font-medium">
+                  <Icon size={16} /> {label}
+                </div>
+                <p className="mt-2 text-2xl font-bold text-slate-900">{value}</p>
+              </div>
+            ))}
+          </div>
+
+          <section>
+            <h3 className="mb-3 flex items-center gap-2 text-lg font-bold text-slate-900"><ChefHat size={18} /> Event Menu List</h3>
+            {menuRows.length === 0 ? <EmptySnapshot label="menu items" /> : (
+              <SnapshotTable>
+                <thead className="bg-slate-50 text-slate-600"><tr><th className="px-4 py-3 text-left">Item</th><th className="px-4 py-3 text-left">Category</th><th className="px-4 py-3 text-right">Qty</th><th className="px-4 py-3 text-right">Total</th></tr></thead>
+                <tbody>{menuRows.map(row => <tr key={row.id} className="border-t border-slate-100"><td className="px-4 py-3 font-semibold text-slate-900">{row.name}</td><td className="px-4 py-3 text-slate-600">{row.category}</td><td className="px-4 py-3 text-right text-slate-700">{row.qty}</td><td className="px-4 py-3 text-right font-semibold">{row.total != null ? fmtINR(row.total) : '—'}</td></tr>)}</tbody>
+              </SnapshotTable>
+            )}
+          </section>
+
+          <section>
+            <h3 className="mb-3 flex items-center gap-2 text-lg font-bold text-slate-900"><Calculator size={18} /> Internal Cost</h3>
+            {costingRows.length === 0 ? <EmptySnapshot label="costing rows" /> : (
+              <SnapshotTable>
+                <thead className="bg-slate-50 text-slate-600"><tr><th className="px-4 py-3 text-left">Item</th><th className="px-4 py-3 text-left">Dish</th><th className="px-4 py-3 text-right">Qty</th><th className="px-4 py-3 text-right">Rate</th><th className="px-4 py-3 text-right">Total</th></tr></thead>
+                <tbody>{costingRows.map(row => <tr key={row.id} className="border-t border-slate-100"><td className="px-4 py-3 font-semibold text-slate-900">{row.ingredient}</td><td className="px-4 py-3 text-slate-600">{row.dishName}</td><td className="px-4 py-3 text-right text-slate-700">{row.qty} {row.unit}</td><td className="px-4 py-3 text-right">{row.rate != null ? fmtINR(row.rate) : '—'}</td><td className="px-4 py-3 text-right font-semibold">{row.total != null ? fmtINR(row.total) : '—'}</td></tr>)}</tbody>
+              </SnapshotTable>
+            )}
+          </section>
+
+          <section>
+            <h3 className="mb-3 flex items-center gap-2 text-lg font-bold text-slate-900"><ShoppingCart size={18} /> Full Grocery List</h3>
+            {groceryRows.length === 0 ? <EmptySnapshot label="grocery items" /> : (
+              <SnapshotTable>
+                <thead className="bg-slate-50 text-slate-600"><tr><th className="px-4 py-3 text-left">Item</th><th className="px-4 py-3 text-left">Category</th><th className="px-4 py-3 text-right">Quantity</th></tr></thead>
+                <tbody>{groceryRows.map(row => <tr key={row.id} className="border-t border-slate-100"><td className="px-4 py-3 font-semibold text-slate-900">{row.ingredient}</td><td className="px-4 py-3 text-slate-600">{row.category}</td><td className="px-4 py-3 text-right font-semibold">{row.quantity} {row.unit}</td></tr>)}</tbody>
+              </SnapshotTable>
+            )}
+          </section>
+        </div>
+      )}
     </div>
   );
 }
@@ -263,177 +542,6 @@ function TimelineItem({ item, isFirst, isLast }: { item: ActivityItem; isFirst: 
         </div>
       )}
     </div>
-  );
-}
-
-// ─── Edit Lead Drawer ───────────────────────────────────────────────────────────
-
-function EditLeadDrawer({ lead, open, onClose, onSaved }: {
-  lead: LeadDetail; open: boolean; onClose: () => void; onSaved: () => void;
-}) {
-  const [form, setForm] = useState({
-    customer_name: lead.customer_name, contact_number: lead.contact_number ?? '',
-    email: lead.email ?? '', source_channel: lead.source_channel ?? 'PHONE_CALL',
-    event_type: lead.event_type ?? '', tentative_date: lead.tentative_date ?? '',
-    guest_count: String(lead.guest_count ?? ''), estimated_budget: String(lead.estimated_budget ?? ''),
-    status: lead.status, notes: lead.notes ?? '',
-  });
-  const [saving, setSaving] = useState(false);
-  const drawerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (open) setForm({
-      customer_name: lead.customer_name, contact_number: lead.contact_number ?? '',
-      email: lead.email ?? '', source_channel: lead.source_channel ?? 'PHONE_CALL',
-      event_type: lead.event_type ?? '', tentative_date: lead.tentative_date ?? '',
-      guest_count: String(lead.guest_count ?? ''), estimated_budget: String(lead.estimated_budget ?? ''),
-      status: lead.status, notes: lead.notes ?? '',
-    });
-  }, [lead, open]);
-
-  useEffect(() => {
-    function handler(e: MouseEvent) {
-      if (open && drawerRef.current && !drawerRef.current.contains(e.target as Node)) onClose();
-    }
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [open, onClose]);
-
-  function set(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!form.customer_name.trim()) { toast.error('Customer name is required'); return; }
-    setSaving(true);
-    try {
-      await api.patch(`/inquiries/${lead.id}/`, {
-        customer_name: form.customer_name, contact_number: form.contact_number || '',
-        email: form.email || '', source_channel: form.source_channel,
-        event_type: form.event_type || '', tentative_date: form.tentative_date || null,
-        guest_count: form.guest_count ? parseInt(form.guest_count) : 1,
-        estimated_budget: form.estimated_budget || null,
-        status: form.status, notes: form.notes || '',
-      });
-      toast.success('Lead updated');
-      onSaved(); onClose();
-    } catch (err: unknown) {
-      const e = err as { data?: Record<string, unknown[]> };
-      const msg = e?.data ? Object.values(e.data).flat().join(', ') : 'Failed to update';
-      toast.error(msg as string);
-    } finally { setSaving(false); }
-  }
-
-  const inp = 'w-full px-3 py-2.5 rounded-xl text-sm outline-none transition-all duration-200';
-  const ist: React.CSSProperties = { border: `1px solid ${C.border}`, backgroundColor: C.surface, color: C.text };
-  const lbl = 'block text-xs font-semibold mb-1.5 uppercase tracking-wide';
-
-  return (
-    <>
-      <div className="fixed inset-0 z-40 transition-opacity backdrop-blur-sm"
-        style={{  opacity: open ? 1 : 0, pointerEvents: open ? 'auto' : 'none' }} />
-      <div ref={drawerRef} className="fixed top-0 right-0 h-full z-50 flex flex-col"
-        style={{ width: 480, backgroundColor: C.card, border: `1px solid ${C.border}`, transform: open ? 'translateX(0)' : 'translateX(100%)', boxShadow: '-8px 0 48px rgba(0,0,0,0.5)', transition: 'transform 0.25s ease' }}>
-        <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: `1px solid ${C.border}` }}>
-          <h2 className="font-bold text-base" style={{ color: C.text }}>Edit Lead</h2>
-          <button onClick={onClose} className="p-2 rounded-xl transition-colors" style={{ color: C.muted }}
-            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = C.surface; }}
-            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; }}>
-            <X size={18} />
-          </button>
-        </div>
-        <form onSubmit={submit} className="flex-1 overflow-y-auto px-6 py-5 flex flex-col gap-4">
-          <div>
-            <label className={lbl} style={{ color: C.muted }}>Customer Name <span style={{ color: C.red }}>*</span></label>
-            <input className={inp} style={ist} required value={form.customer_name} onChange={e => set('customer_name', e.target.value)}
-              onFocus={e => { e.currentTarget.style.borderColor = C.orange; e.currentTarget.style.boxShadow = `0 0 0 3px ${C.orangeDim}`; }}
-              onBlur={e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.boxShadow = 'none'; }} />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={lbl} style={{ color: C.muted }}>Contact</label>
-              <input className={inp} style={ist} type="tel" value={form.contact_number} onChange={e => set('contact_number', e.target.value)}
-                onFocus={e => { e.currentTarget.style.borderColor = C.orange; e.currentTarget.style.boxShadow = `0 0 0 3px ${C.orangeDim}`; }}
-                onBlur={e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.boxShadow = 'none'; }} />
-            </div>
-            <div>
-              <label className={lbl} style={{ color: C.muted }}>Email</label>
-              <input className={inp} style={ist} type="email" value={form.email} onChange={e => set('email', e.target.value)}
-                onFocus={e => { e.currentTarget.style.borderColor = C.orange; e.currentTarget.style.boxShadow = `0 0 0 3px ${C.orangeDim}`; }}
-                onBlur={e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.boxShadow = 'none'; }} />
-            </div>
-          </div>
-          <div>
-            <label className={lbl} style={{ color: C.muted }}>Source Channel</label>
-            <div className="flex gap-2 mt-1">
-              {SOURCE_CHANNEL_OPTIONS.map(ch => (
-                <label key={ch.value} className="flex items-center gap-2 px-3 py-2 rounded-xl cursor-pointer transition-all duration-150 flex-1 justify-center"
-                  style={{ border: `1px solid ${form.source_channel === ch.value ? C.orange : C.border}`, backgroundColor: form.source_channel === ch.value ? C.orangeDim : C.surface }}>
-                  <input type="radio" name="edit_source_channel" value={ch.value}
-                    checked={form.source_channel === ch.value} onChange={() => set('source_channel', ch.value)} className="sr-only" />
-                  <span className="text-xs font-medium" style={{ color: form.source_channel === ch.value ? C.orange : C.muted }}>{ch.label}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-          <div>
-            <label className={lbl} style={{ color: C.muted }}>Event Type</label>
-            <select className={inp} style={ist} value={form.event_type} onChange={e => set('event_type', e.target.value)}
-              onFocus={e => { e.currentTarget.style.borderColor = C.orange; }}
-              onBlur={e => { e.currentTarget.style.borderColor = C.border; }}>
-              <option value="">Select event type</option>
-              {EVENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={lbl} style={{ color: C.muted }}>Tentative Date</label>
-              <input className={inp} style={ist} type="date" value={form.tentative_date} onChange={e => set('tentative_date', e.target.value)}
-                onFocus={e => { e.currentTarget.style.borderColor = C.orange; }}
-                onBlur={e => { e.currentTarget.style.borderColor = C.border; }} />
-            </div>
-            <div>
-              <label className={lbl} style={{ color: C.muted }}>Guests</label>
-              <input className={inp} style={ist} type="number" min="1" value={form.guest_count} onChange={e => set('guest_count', e.target.value)}
-                onFocus={e => { e.currentTarget.style.borderColor = C.orange; }}
-                onBlur={e => { e.currentTarget.style.borderColor = C.border; }} />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={lbl} style={{ color: C.muted }}>Budget (₹)</label>
-              <input className={inp} style={ist} type="number" min="0" step="100" value={form.estimated_budget} onChange={e => set('estimated_budget', e.target.value)}
-                onFocus={e => { e.currentTarget.style.borderColor = C.orange; }}
-                onBlur={e => { e.currentTarget.style.borderColor = C.border; }} />
-            </div>
-            <div>
-              <label className={lbl} style={{ color: C.muted }}>Status</label>
-              <select className={inp} style={ist} value={form.status} onChange={e => set('status', e.target.value)}
-                onFocus={e => { e.currentTarget.style.borderColor = C.orange; }}
-                onBlur={e => { e.currentTarget.style.borderColor = C.border; }}>
-                {['PLANNING', 'NEW', 'QUALIFIED', 'FOLLOW_UP', 'QUOTED', 'CONFIRMED', 'REJECTED'].map(s =>
-                  <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
-              </select>
-            </div>
-          </div>
-          <div>
-            <label className={lbl} style={{ color: C.muted }}>Notes</label>
-            <textarea className={inp} style={{ ...ist, resize: 'vertical' }} rows={3} value={form.notes} onChange={e => set('notes', e.target.value)}
-              onFocus={e => { e.currentTarget.style.borderColor = C.orange; }}
-              onBlur={e => { e.currentTarget.style.borderColor = C.border; }} />
-          </div>
-          <div className="flex items-center justify-end gap-3 pt-2 pb-4 mt-auto">
-            <button type="button" onClick={onClose} className="px-4 py-2.5 rounded-xl text-sm font-medium"
-              style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancel</button>
-            <button type="submit" disabled={saving}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold text-white transition-all"
-              style={{ backgroundColor: C.orange, opacity: saving ? 0.7 : 1, boxShadow: `0 4px 16px ${C.orangeDim}` }}>
-              {saving && <Loader2 size={14} className="animate-spin" />}
-              {saving ? 'Saving…' : 'Update Lead'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </>
   );
 }
 
@@ -518,6 +626,128 @@ function StatusDropdown({ lead, onStatusChange }: { lead: LeadDetail; onStatusCh
   );
 }
 
+function ConvertToEventDialog({
+  open,
+  loading,
+  onCancel,
+  onConfirm,
+}: {
+  open: boolean;
+  loading: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4 backdrop-blur-sm">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="convert-event-title"
+        aria-describedby="convert-event-description"
+        className="w-full max-w-md rounded-3xl bg-white p-7 shadow-2xl ring-1 ring-black/5"
+      >
+        <div className="flex items-start gap-4">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600">
+            <AlertTriangle size={22} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2 id="convert-event-title" className="text-xl font-bold text-slate-900">
+              Convert to Event?
+            </h2>
+            <p id="convert-event-description" className="mt-2 text-base leading-6 text-slate-600">
+              This will confirm the enquiry and create a new event with all dishes, services, and pricing. This cannot be undone.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-6 flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={loading}
+            className="rounded-2xl bg-slate-100 px-5 py-2.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={loading}
+            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
+          >
+            {loading && <Loader2 size={16} className="animate-spin" />}
+            Confirm &amp; Convert
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StartRevisionDialog({
+  open,
+  loading,
+  nextRevisionNumber,
+  onCancel,
+  onConfirm,
+}: {
+  open: boolean;
+  loading: boolean;
+  nextRevisionNumber: number;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4 backdrop-blur-sm">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="start-revision-title"
+        aria-describedby="start-revision-description"
+        className="w-full max-w-md rounded-3xl bg-white p-7 shadow-2xl ring-1 ring-black/5"
+      >
+        <div className="flex items-start gap-4">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-violet-50 text-violet-600">
+            <AlertTriangle size={22} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2 id="start-revision-title" className="text-xl font-bold text-slate-900">
+              Start Revision {nextRevisionNumber}?
+            </h2>
+            <p id="start-revision-description" className="mt-2 text-base leading-6 text-slate-600">
+              The quotation will revert to Planning state, pricing will be cleared, and you can update menu and services.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-6 flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={loading}
+            className="rounded-2xl bg-slate-100 px-5 py-2.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={loading}
+            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-violet-500 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-violet-600 disabled:cursor-not-allowed disabled:opacity-70"
+          >
+            {loading && <Loader2 size={16} className="animate-spin" />}
+            Confirm → Rev {nextRevisionNumber}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Page ──────────────────────────────────────────────────────────────────
 
 export default function LeadDetailPage() {
@@ -528,6 +758,12 @@ export default function LeadDetailPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [convertModalOpen, setConvertModalOpen] = useState(false);
+  const [convertLoading, setConvertLoading] = useState(false);
+  const [convertedEventId, setConvertedEventId] = useState<string | null>(null);
+  const [revisionModalOpen, setRevisionModalOpen] = useState(false);
+  const [revisionLoading, setRevisionLoading] = useState(false);
+  const [currentRevisionNumber, setCurrentRevisionNumber] = useState(1);
   const [noteDraft, setNoteDraft] = useState('');
   const quotationSectionRef = useRef<HTMLDivElement | null>(null);
   const { data: lead, isLoading, isError } = useQuery<LeadDetail>({
@@ -544,6 +780,25 @@ export default function LeadDetailPage() {
     },
     enabled: !!id,
   });
+  const leadConvertedEventId = lead?.converted_event_id ?? lead?.event_id ?? null;
+
+  useEffect(() => {
+    if (leadConvertedEventId) setConvertedEventId(leadConvertedEventId);
+  }, [leadConvertedEventId]);
+
+  useEffect(() => {
+    if (latestQuotation?.version_number) {
+      setCurrentRevisionNumber(latestQuotation.version_number);
+    }
+  }, [latestQuotation?.version_number]);
+
+  const canFetchConvertedEvent = Boolean(convertedEventId && convertedEventId !== EXISTING_EVENT_SENTINEL);
+  const { data: convertedEventData, isLoading: isConvertedEventLoading } = useQuery<EventSnapshotResponse>({
+    queryKey: ['converted-event', convertedEventId],
+    queryFn: () => api.get(`/events/${convertedEventId}/`),
+    enabled: canFetchConvertedEvent,
+  });
+  const hasEvent = Boolean(convertedEventId);
 
   async function handleStatusChange(newStatus: string) {
     if (!lead) return;
@@ -579,32 +834,71 @@ export default function LeadDetailPage() {
   }
 
   async function handleReviseQuotation() {
-    if (!latestQuotation?.id) return;
+    if (!latestQuotation?.id) {
+      toast.error('No quotation available to revise');
+      return;
+    }
+    if (revisionLoading) return;
+
+    setRevisionLoading(true);
+    const toastId = toast.loading(`Creating revision ${nextRevisionNumber}...`);
     try {
-      await api.post(`/quotations/${latestQuotation.id}/revise/`, {});
-      toast.success('New quotation revision created');
+      const revised = await api.post(`/quotations/${latestQuotation.id}/revise/`, {}) as {
+        rev_number?: number;
+        version_number?: number;
+        version?: number;
+      };
+      const createdRevisionNumber = Number(
+        revised.rev_number ?? revised.version_number ?? revised.version ?? nextRevisionNumber
+      );
+      setCurrentRevisionNumber(createdRevisionNumber);
+      setRevisionModalOpen(false);
+      toast.success(`Revision ${createdRevisionNumber} created`, { id: toastId });
       await Promise.all([
         qc.invalidateQueries({ queryKey: ['lead-quotation-summary', id] }),
         qc.invalidateQueries({ queryKey: ['quotation-menu', id] }),
         qc.invalidateQueries({ queryKey: ['lead', id] }),
       ]);
       quotationSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    } catch {
-      toast.error('Failed to revise quotation');
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, 'Failed to revise quotation'), { id: toastId });
+    } finally {
+      setRevisionLoading(false);
     }
   }
 
   async function handleConfirmAndConvert() {
     if (!lead) return;
+    if (hasEvent) {
+      toast.error('Event already created');
+      setConvertModalOpen(false);
+      return;
+    }
+    if (convertLoading) return;
+
+    setConvertLoading(true);
     const toastId = toast.loading('Converting lead to event...');
     try {
-      await api.post(`/inquiries/${lead.id}/convert/`, {});
-      await api.patch(`/inquiries/${lead.id}/`, { status: 'CONFIRMED' });
+      const result = await api.post(`/inquiries/${lead.id}/convert/`, {}) as { event_id?: string; id?: string };
+      const eventId = result.event_id ?? result.id;
+      if (eventId) setConvertedEventId(eventId);
+      setConvertModalOpen(false);
       toast.success('Lead confirmed and converted to event', { id: toastId });
-      router.push('/events');
-      await qc.invalidateQueries({ queryKey: ['lead', id] });
-    } catch {
-      toast.error('Failed to confirm and convert', { id: toastId });
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['lead', id] }),
+        eventId ? qc.invalidateQueries({ queryKey: ['converted-event', eventId] }) : Promise.resolve(),
+      ]);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) {
+        setConvertedEventId(leadConvertedEventId ?? EXISTING_EVENT_SENTINEL);
+        setConvertModalOpen(false);
+        toast.error('Event already created', { id: toastId });
+        await qc.invalidateQueries({ queryKey: ['lead', id] });
+      } else {
+        toast.error(getApiErrorMessage(error, 'Failed to confirm and convert'), { id: toastId });
+      }
+    } finally {
+      setConvertLoading(false);
     }
   }
 
@@ -642,8 +936,13 @@ export default function LeadDetailPage() {
   const quoteId = `QT-${new Date().getFullYear()}-${id.slice(-4).toUpperCase().padStart(4, '0')}`;
   const sourceChannelLabel = SOURCE_CHANNELS[lead.source_channel ?? ''] ?? 'General';
   const leadStatus = lead.status;
-  const quotationVersion = latestQuotation?.version_number ?? 1;
-  const isQuotationLocked = Boolean(latestQuotation?.is_locked);
+  const latestQuotationStatus = String(latestQuotation?.status ?? 'DRAFT').toUpperCase();
+  const quotationVersion = currentRevisionNumber;
+  const nextRevisionNumber = currentRevisionNumber + 1;
+  const isQuotationFinalized = Boolean(latestQuotation?.is_locked)
+    || ['SENT', 'ACCEPTED'].includes(latestQuotationStatus);
+  const isQuotationDraft = !isQuotationFinalized;
+  const planningLabel = quotationVersion > 1 ? `Planning - Rev. ${quotationVersion}` : 'Planning';
   const quotedPrice = Number(latestQuotation?.final_selling_price ?? 0);
   const internalCost = Number(latestQuotation?.internal_cost ?? 0);
   const advance = Number(latestQuotation?.advance_amount ?? 0);
@@ -654,13 +953,30 @@ export default function LeadDetailPage() {
     <div className="min-h-screen max-w-7xl mx-auto" style={{ backgroundColor: C.bg }}>
       {/* Overlays / Drawers */}
       {editOpen && (
-        <EditLeadDrawer lead={lead} open={editOpen} onClose={() => setEditOpen(false)}
+        <LeadFormDrawer editing={lead} open={editOpen} onClose={() => setEditOpen(false)}
           onSaved={() => qc.invalidateQueries({ queryKey: ['lead', id] })} />
       )}
       {deleteOpen && (
         <DeleteModal name={lead.customer_name} onConfirm={handleDelete}
           onCancel={() => setDeleteOpen(false)} loading={deleting} />
       )}
+      <ConvertToEventDialog
+        open={convertModalOpen}
+        loading={convertLoading}
+        onCancel={() => {
+          if (!convertLoading) setConvertModalOpen(false);
+        }}
+        onConfirm={() => void handleConfirmAndConvert()}
+      />
+      <StartRevisionDialog
+        open={revisionModalOpen}
+        loading={revisionLoading}
+        nextRevisionNumber={nextRevisionNumber}
+        onCancel={() => {
+          if (!revisionLoading) setRevisionModalOpen(false);
+        }}
+        onConfirm={() => void handleReviseQuotation()}
+      />
       <div className="max-w-screen-2xl mx-auto px-4 py-5">
 
         {/* Lead Detail Header */}
@@ -676,7 +992,10 @@ export default function LeadDetailPage() {
               </button>
               <div className="min-w-0">
                 <h1 className="text-3xl font-black tracking-tight truncate" style={{ color: C.text }}>
-                  {quoteId}
+                  {lead.customer_name}
+                  {lead.event_type && (
+                    <span className="font-normal text-2xl" style={{ color: C.muted }}> · {lead.event_type}</span>
+                  )}
                 </h1>
                 <p className="text-sm mt-1" style={{ color: C.muted }}>
                   Created {fmtDate(lead.created_at)}
@@ -714,7 +1033,7 @@ export default function LeadDetailPage() {
           <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             {[
               { label: 'Client', value: lead.customer_name },
-              { label: 'Venue', value: lead.notes?.trim() ? lead.notes : '—' },
+              { label: 'Venue', value: lead.venue?.trim() ? lead.venue : '—' },
               { label: 'Date & Time', value: lead.tentative_date ? fmtDateTime(lead.tentative_date) : '—' },
               { label: 'Guests', value: lead.guest_count ? `${lead.guest_count} people` : '—' },
             ].map(({ label, value }) => (
@@ -727,7 +1046,16 @@ export default function LeadDetailPage() {
         </div>
 
         <div className="mb-5">
-          <LeadStatusStepper status={lead.status} />
+          <LeadStatusStepper
+            status={lead.status}
+            isQuotationLocked={isQuotationFinalized}
+            convertedEventId={
+              convertedEventId && convertedEventId !== EXISTING_EVENT_SENTINEL
+                ? convertedEventId
+                : leadConvertedEventId
+            }
+            convertedEventStatus={lead.converted_event_status}
+          />
         </div>
 
         {/* Main Grid */}
@@ -749,6 +1077,16 @@ export default function LeadDetailPage() {
                 eventType={lead.event_type}
               />
             </div>
+
+            {canFetchConvertedEvent && convertedEventId && (
+              <ConfirmedEventDetails
+                rawEventData={convertedEventData}
+                loading={isConvertedEventLoading}
+                eventId={convertedEventId}
+                onOpenEvent={() => router.push(`/events/${convertedEventId}`)}
+                onDownloadQuotation={() => void handleDownloadQuotation()}
+              />
+            )}
 
             {/* ── Activity Timeline ── */}
             {/* <Card> */}
@@ -795,80 +1133,119 @@ export default function LeadDetailPage() {
           {/* ══════════════════════ RIGHT SIDEBAR ══════════════════════ */}
           <div className="flex flex-col gap-4 lg:sticky lg:top-5 self-start">
             <div className="rounded-3xl border border-black/10 bg-white p-5 shadow-sm">
-              <p className="text-lg font-semibold tracking-wide text-slate-600 mb-4">ACTIONS</p>
-              {(leadStatus === 'PLANNING' || leadStatus === 'NEW' || leadStatus === 'QUALIFIED' || leadStatus === 'FOLLOW_UP') && (
+              <p className="text-md font-semibold tracking-wide text-slate-600 mb-4">ACTIONS</p>
+              {leadStatus === 'PLANNING' && (
                 <>
-                  <div className="rounded-2xl border px-4 py-2 mb-4" style={{ borderColor: '#F4CD53', backgroundColor: '#FFF8E5' }}>
-                    <p className="text-orange-600 font-semibold text-md">Planning</p>
-                    <p className="text-orange-500 text-sm mt-0.5">
-                      {isQuotationLocked ? 'Pricing is locked for current revision' : 'Edit menu, costing & pricing freely'}
-                    </p>
-                  </div>
-                  {!isQuotationLocked ? (
+                  {isQuotationDraft ? (
+                    <>
+                    <div className="rounded-2xl border px-4 py-2 mb-4" style={{ borderColor: '#F4CD53', backgroundColor: '#FFF8E5' }}>
+                      <p className="text-orange-600 font-semibold text-md">{planningLabel}</p>
+                      <p className="text-orange-500 text-sm mt-0.5">
+                        Edit menu, costing & pricing freely
+                      </p>
+                    </div>
                     <button
                       type="button"
                       onClick={() => quotationSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-                      className="w-full rounded-2xl px-4 py-2 text-white text-xl font-semibold mb-3 inline-flex items-center justify-center gap-2"
+                      className="w-full rounded-2xl px-4 py-2 text-white text-md font-semibold mb-3 inline-flex items-center justify-center gap-2"
                       style={{ background: 'linear-gradient(180deg, #5F4BFF 0%, #4338CA 100%)' }}
                     >
-                      <CheckCircle size={20} />
-                      Finalize &amp; Send Quotation
+                      <IndianRupee size={20} />
+                      Go to Pricing &amp; Quote
                     </button>
+                    </>
                   ) : (
-                    <button
-                      type="button"
-                      onClick={() => void handleReviseQuotation()}
-                      className="w-full rounded-2xl px-4 py-2 text-indigo-700 text-lg font-semibold mb-3 border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 transition-colors inline-flex items-center justify-center gap-2"
-                    >
-                      <RotateCcw size={18} />
-                      Revise Quotation
-                    </button>
+                    <>
+                      <div className="rounded-2xl border px-4 py-2 mb-3" style={{ borderColor: '#BFDBFE', backgroundColor: '#EFF6FF' }}>
+                        <p className="text-blue-700 font-semibold text-md inline-flex items-center gap-2">
+                          <Lock size={16} />
+                          {hasEvent ? 'Event Already Created' : 'Quotation Sent'}
+                        </p>
+                        <p className="text-blue-600 text-sm mt-0.5">
+                          {hasEvent ? 'Event already created. Revisions create a new draft quote only.' : `Awaiting client decision • Rev ${quotationVersion}`}
+                        </p>
+                      </div>
+                      {!hasEvent && (
+                        <button
+                          type="button"
+                          onClick={() => setConvertModalOpen(true)}
+                          className="w-full rounded-2xl px-4 py-2 text-white text-md font-semibold mb-2 bg-emerald-600 hover:bg-emerald-700 transition-colors inline-flex items-center justify-center gap-2"
+                        >
+                          <CheckCircle size={20} />
+                          Confirm &amp; Convert to Event
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setRevisionModalOpen(true)}
+                        className="w-full rounded-2xl px-4 py-2 text-indigo-700 text-md font-semibold mb-3 border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 transition-colors inline-flex items-center justify-between"
+                      >
+                        <span className="inline-flex items-center gap-2">
+                          <RotateCcw size={18} />
+                          Revise Quotation
+                        </span>
+                        <span className="text-sm font-semibold">→ Rev {nextRevisionNumber}</span>
+                      </button>
+                    </>
                   )}
                 </>
               )}
 
-              {leadStatus === 'QUOTED' && (
+              {leadStatus === 'SUCCESS' && (
                 <>
                   <div className="rounded-2xl border px-4 py-2 mb-4" style={{ borderColor: '#BFDBFE', backgroundColor: '#EFF6FF' }}>
                     <p className="text-blue-700 font-semibold text-md inline-flex items-center gap-2">
                       <Lock size={16} />
-                      Quotation Sent
+                      {hasEvent ? 'Event Already Created' : 'Quotation Sent'}
                     </p>
-                    <p className="text-blue-600 text-sm mt-0.5">Awaiting client decision • Rev {quotationVersion}</p>
+                    <p className="text-blue-600 text-sm mt-0.5">
+                      {hasEvent ? 'Event already created. Revisions create a new draft quote only.' : `Awaiting client decision • Rev ${quotationVersion}`}
+                    </p>
                   </div>
+                  {canFetchConvertedEvent && convertedEventId ? (
+                    <button
+                      type="button"
+                      onClick={() => router.push(`/events/${convertedEventId}`)}
+                      className="w-full rounded-2xl px-4 py-2 text-white text-md font-semibold mb-2 bg-emerald-600 hover:bg-emerald-700 transition-colors inline-flex items-center justify-center gap-2"
+                    >
+                      <ExternalLink size={18} />
+                      Open Event
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setConvertModalOpen(true)}
+                      className="w-full rounded-2xl px-4 py-2 text-white text-md font-semibold mb-2 bg-emerald-600 hover:bg-emerald-700 transition-colors inline-flex items-center justify-center gap-2"
+                    >
+                      <CheckCircle size={20} />
+                      Confirm &amp; Convert to Event
+                    </button>
+                  )}
                   <button
                     type="button"
-                    onClick={() => void handleConfirmAndConvert()}
-                    className="w-full rounded-2xl px-4 py-2 text-white text-md font-semibold mb-2 bg-emerald-600 hover:bg-emerald-700 transition-colors inline-flex items-center justify-center gap-2"
-                  >
-                    <CheckCircle size={20} />
-                    Confirm &amp; Convert to Event
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void handleReviseQuotation()}
+                    onClick={() => setRevisionModalOpen(true)}
                     className="w-full rounded-2xl px-4 py-2 text-indigo-700 text-md font-semibold mb-3 border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 transition-colors inline-flex items-center justify-between"
                   >
                     <span className="inline-flex items-center gap-2">
                       <RotateCcw size={18} />
                       Revise Quotation
                     </span>
-                    <span className="text-sm font-semibold">→ Rev {quotationVersion + 1}</span>
+                    <span className="text-sm font-semibold">→ Rev {nextRevisionNumber}</span>
                   </button>
                 </>
               )}
 
-              {leadStatus === 'CONFIRMED' && (
+              {leadStatus === 'SUCCESS' && (
                 <div className="rounded-2xl border px-4 py-2 mb-4" style={{ borderColor: '#A7F3D0', backgroundColor: '#ECFDF5' }}>
-                  <p className="text-emerald-700 font-semibold text-md">Event Confirmed</p>
+                  <p className="text-emerald-700 font-semibold text-md">Lead Success</p>
                   <p className="text-emerald-600 text-sm mt-0.5">Use event workflow actions only.</p>
                 </div>
               )}
 
-              {(leadStatus === 'PLANNING' || leadStatus === 'NEW' || leadStatus === 'QUALIFIED' || leadStatus === 'FOLLOW_UP' || leadStatus === 'QUOTED') && (
+              {(leadStatus === 'PLANNING' || leadStatus === 'SUCCESS') && (
                 <button
                   type="button"
-                  onClick={() => handleStatusChange('REJECTED')}
+                  onClick={() => handleStatusChange('LOST')}
                   className="w-full rounded-2xl border px-4 py-2 text-red-600 text-md font-semibold hover:bg-red-50 transition-colors inline-flex items-center justify-center gap-2"
                   style={{ borderColor: '#F4B4B4' }}
                 >
@@ -897,7 +1274,7 @@ export default function LeadDetailPage() {
                   <span className="text-slate-600">Advance</span>
                   <span className="font-semibold text-emerald-600">{fmtMoney(advance)}</span>
                 </div>
-                <div className="text-xs text-slate-500 pt-1">Rev {quotationVersion} {isQuotationLocked ? '• Locked' : '• Editable'}</div>
+                <div className="text-xs text-slate-500 pt-1">Rev {quotationVersion} {isQuotationFinalized ? '• Locked' : '• Editable'}</div>
               </div>
             </div>
 

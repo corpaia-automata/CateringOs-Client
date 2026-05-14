@@ -1,0 +1,117 @@
+.pageRoot {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  box-sizing: border-box;
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 36px 48px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+}
+
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.item {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.numberCircle {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--q-gold);
+  color: #fff;
+  font-family: var(--font-q-body), var(--q-font-body), sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 32px;
+  text-align: center;
+}
+
+.itemBody {
+  min-width: 0;
+}
+
+.itemTitle {
+  margin: 0;
+  font-family: var(--font-q-body), var(--q-font-body), sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--q-dark);
+}
+
+.itemText {
+  margin: 6px 0 0;
+  font-family: var(--font-q-body), var(--q-font-body), sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.55;
+  color: var(--q-text);
+}
+
+.gallery {
+  margin-top: 24px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(2, 88px);
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.galleryCell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 2px;
+  font-family: var(--font-q-body), var(--q-font-body), sans-serif;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.galleryCell:nth-child(1) {
+  background: #c8963c;
+}
+
+.galleryCell:nth-child(2) {
+  background: #b8873e;
+}
+
+.galleryCell:nth-child(3) {
+  background: #9a6e2a;
+}
+
+.galleryCell:nth-child(4) {
+  background: #d4a85a;
+}
+
+.galleryCell:nth-child(5) {
+  background: #7d5220;
+}
+
+.galleryCell:nth-child(6) {
+  background: #e8c47a;
+  color: rgba(26, 26, 26, 0.88);
+}

@@ -1,0 +1,223 @@
+/**
+ * Structural layout for quotation sections (no brand colors).
+ * Theme CSS files supply tokens and decorative styling.
+ */
+
+.q-cover__hero {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 2 / 1;
+  max-height: 42vh;
+  overflow: hidden;
+}
+
+.q-cover__hero-image {
+  object-fit: cover;
+}
+
+.q-cover__logo-wrap {
+  display: flex;
+  justify-content: center;
+  margin-bottom: var(--q-spacing-unit, 1rem);
+}
+
+.q-cover__logo {
+  max-width: 12rem;
+  height: auto;
+  object-fit: contain;
+}
+
+.q-cover__tagline {
+  margin: 0.5rem 0 0;
+  font-family: var(--q-font-body, sans-serif);
+  font-size: 1rem;
+  max-width: 40ch;
+  margin-inline: auto;
+}
+
+.q-cover__meta {
+  margin-top: var(--q-spacing-unit, 1rem);
+  font-family: var(--q-font-body, sans-serif);
+}
+
+.q-cover__meta-line {
+  margin: 0.25rem 0 0;
+}
+
+.q-event-details__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--q-spacing-unit, 1rem) 2rem;
+}
+
+@media (max-width: 480px) {
+  .q-event-details__grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.q-event-details__field-label {
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--q-muted, inherit);
+  margin: 0 0 0.25rem;
+}
+
+.q-event-details__field-value {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.q-menu__category {
+  margin-top: var(--q-spacing-unit, 1rem);
+}
+
+.q-menu__category:first-child {
+  margin-top: 0;
+}
+
+.q-menu__category-title {
+  font-family: var(--q-font-heading, serif);
+  font-size: 1rem;
+  margin: 0 0 0.5rem;
+}
+
+.q-menu__cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+@media (max-width: 640px) {
+  .q-menu__cards {
+    grid-template-columns: 1fr;
+  }
+}
+
+.q-menu__card-title {
+  font-weight: 600;
+  margin: 0 0 0.35rem;
+}
+
+.q-menu__card-meta {
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+.q-menu__row-extra {
+  margin-left: 0.35rem;
+}
+
+.q-services__row {
+  margin-bottom: 0.75rem;
+}
+
+.q-services__row:last-child {
+  margin-bottom: 0;
+}
+
+.q-services__name {
+  font-weight: 600;
+  margin: 0 0 0.25rem;
+}
+
+.q-services__meta,
+.q-services__equipment {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.q-pricing__rows {
+  width: 100%;
+}
+
+.q-pricing__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--q-primary, #333) 12%, transparent);
+}
+
+.q-pricing__row:last-child {
+  border-bottom: none;
+}
+
+.q-pricing__row-label {
+  margin: 0;
+}
+
+.q-pricing__row-value {
+  margin: 0;
+  text-align: right;
+}
+
+.q-pricing__highlight-total {
+  margin-top: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-radius: var(--q-border-radius, 4px);
+  background: color-mix(in srgb, var(--q-accent, #888) 22%, transparent);
+}
+
+.q-terms__footer {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.q-terms-page-marker {
+  margin: 0.75rem 0 0;
+  font-size: 0.8rem;
+}
+
+.quotation-root {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 6rem;
+}
+
+.quotation-root.print-mode {
+  padding-bottom: 1rem;
+}
+
+.q-action-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 0.8rem 1rem;
+  background: color-mix(in srgb, var(--q-primary, #111) 93%, white);
+}
+
+.q-action-bar__button {
+  border: 1px solid color-mix(in srgb, var(--q-accent, #c9a84c) 65%, white);
+  border-radius: var(--q-border-radius, 6px);
+  background: var(--q-accent, #c9a84c);
+  color: var(--q-primary, #111);
+  font-weight: 600;
+  padding: 0.55rem 0.9rem;
+  cursor: pointer;
+}
+
+.q-action-bar__button:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.q-action-bar__button--secondary {
+  background: transparent;
+  color: #fff;
+  border-color: color-mix(in srgb, white 42%, transparent);
+}
+
+.q-action-bar__message {
+  color: #fff;
+  font-size: 0.85rem;
+}

@@ -2,6 +2,10 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
+html {
+  scroll-behavior: smooth;
+}
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
@@ -95,6 +99,16 @@
   --brand-teal: #0D9488;
   --brand-warning: #F97316;
   --brand-danger: #DC2626;
+
+  /* CateringOS quotation UI (forest + gold) */
+  --cos-forest: #134e3a;
+  --cos-forest-dark: #0d3d2c;
+  --cos-forest-mid: #166b52;
+  --cos-gold: #c9a227;
+  --cos-gold-light: #e8d5a3;
+  --cos-gold-bright: #f0e6c8;
+  --cos-canvas: #e5eae7;
+  --cos-card-border: #d5ddd8;
 }
 
 .dark {

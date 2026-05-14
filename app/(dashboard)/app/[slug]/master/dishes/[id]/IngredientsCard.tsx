@@ -42,8 +42,8 @@ type Tab = 'manual' | 'excel';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
-const BATCH_UNIT_OPTIONS = ['KG', 'G', 'LITRE', 'ML', 'PIECE', 'PACKET', 'BOX', 'DOZEN'];
-const LINE_UNIT_OPTIONS  = ['KG', 'G', 'LITRE', 'ML', 'PIECE', 'NOS', 'DOZEN', 'PACKET', 'BOX'];
+const BATCH_UNIT_OPTIONS = ['KG', 'G', 'LITRE', 'ML', 'PIECE', 'PACKET', 'BOX', 'DOZEN', 'UNIT'];
+const LINE_UNIT_OPTIONS  = ['KG', 'G', 'LITRE', 'ML', 'PIECE', 'NOS', 'DOZEN', 'PACKET', 'BOX', 'UNIT', 'PEELED'];
 
 const CATEGORY_COLORS: Record<string, string> = {
   GROCERY:    'bg-amber-50  text-amber-700',
@@ -95,12 +95,66 @@ function lineAmount(l: WorkingLine): number {
 }
 
 function normalizeHeader(h: string): string {
-  return h.trim().toLowerCase().replace(/[\s_-]+/g, '_');
+  return h.trim().toLowerCase().replace(/[./-]+/g, '_').replace(/[\s_]+/g, '_').replace(/^_|_$/g, '');
 }
 
-function closestUnit(raw: string): string {
-  const v = (raw ?? '').toString().trim().toUpperCase();
-  return LINE_UNIT_OPTIONS.includes(v) ? v : 'KG';
+function normalizeUnitToken(raw: string): string {
+  return (raw ?? '').toString().trim().toUpperCase().replace(/[./\s_-]+/g, '');
+}
+
+function closestUnit(raw: string): string | undefined {
+  const v = normalizeUnitToken(raw);
+  if (!v) return 'KG';
+  const aliases: Record<string, string> = {
+    KG: 'KG',
+    KGS: 'KG',
+    KILOGRAM: 'KG',
+    KILOGRAMS: 'KG',
+    G: 'G',
+    GM: 'G',
+    GMS: 'G',
+    GRAM: 'G',
+    GRAMS: 'G',
+    L: 'LITRE',
+    LT: 'LITRE',
+    LTR: 'LITRE',
+    LTRS: 'LITRE',
+    LITRE: 'LITRE',
+    LITRES: 'LITRE',
+    LITER: 'LITRE',
+    LITERS: 'LITRE',
+    ML: 'ML',
+    MILLILITRE: 'ML',
+    MILLILITRES: 'ML',
+    MILLILITER: 'ML',
+    MILLILITERS: 'ML',
+    PIECE: 'PIECE',
+    PIECES: 'PIECE',
+    PC: 'PIECE',
+    PCS: 'PIECE',
+    NOS: 'NOS',
+    NO: 'NOS',
+    NUMBER: 'NOS',
+    NUMBERS: 'NOS',
+    DOZEN: 'DOZEN',
+    DOZENS: 'DOZEN',
+    DZ: 'DOZEN',
+    PACKET: 'PACKET',
+    PACKETS: 'PACKET',
+    PACK: 'PACKET',
+    PACKS: 'PACKET',
+    PKT: 'PACKET',
+    PKTS: 'PACKET',
+    BOX: 'BOX',
+    BOXES: 'BOX',
+    BX: 'BOX',
+    UNIT: 'UNIT',
+    UNITS: 'UNIT',
+    PEELED: 'PEELED',
+    PEEL: 'PEELED',
+  };
+  const unit = aliases[v] ?? v;
+  return LINE_UNIT_OPTIONS.includes(unit) ? unit : undefined;
 }
 
 function normalizeIngredientCategory(raw: string): string | undefined {
@@ -188,10 +242,16 @@ function formatMoneyValue(value: number | string): string {
 
 const UOM_TO_MODEL: Record<string, string> = {
   KG: 'kg', G: 'g', LITRE: 'litre', ML: 'ml',
-  PIECE: 'piece', NOS: 'piece', DOZEN: 'dozen', PACKET: 'packet', BOX: 'box',
+  PIECE: 'piece', NOS: 'piece', DOZEN: 'dozen', PACKET: 'packet', BOX: 'box', UNIT: 'unit',
+  PEELED: 'peeled',
 };
 function toModelUom(unit: string): string {
   return UOM_TO_MODEL[unit.toUpperCase()] ?? 'kg';
+}
+
+function toIngredientModelUom(unit: string): string {
+  const modelUnit = toModelUom(unit);
+  return modelUnit === 'unit' ? 'piece' : modelUnit;
 }
 
 // ── IngredientTableRow ─────────────────────────────────────────────────────────
@@ -530,7 +590,7 @@ export default function IngredientsCard({ dishId, dishName, recipe }: Props) {
       );
       const qtyIdx    = headerRow.findIndex(h => ['quantity', 'qty'].includes(h));
       const catIdx    = headerRow.findIndex(h => ['category', 'cat', 'ingredient_category', 'item_category', 'ingredient_cat'].includes(h));
-      const unitIdx   = headerRow.findIndex(h => h === 'unit');
+      const unitIdx   = headerRow.findIndex(h => ['unit', 'units', 'uom', 'u_o_m', 'unit_of_measure', 'measure', 'measurement'].includes(h));
       const rateIdx   = headerRow.findIndex(h => ['rate', 'unit_rate', 'price'].includes(h));
       const amtIdx    = headerRow.findIndex(h => ['amount', 'total', 'line_total', 'total_amount'].includes(h));
 
@@ -539,9 +599,11 @@ export default function IngredientsCard({ dishId, dishName, recipe }: Props) {
         return;
       }
 
+      const invalidUnits: string[] = [];
       const parsed: BulkRow[] = (raw.slice(1) as string[][])
         .filter(row => String(row[nameIdx] ?? '').trim())
-        .map(row => {
+        .flatMap(row => {
+          const rawName = String(row[nameIdx]).trim();
           const qtyRaw = String(row[qtyIdx] ?? '').trim();
           const qtyNum = parseCellNumber(qtyRaw);
           const rateNum = rateIdx !== -1 ? parseCellNumber(row[rateIdx]) : undefined;
@@ -551,16 +613,26 @@ export default function IngredientsCard({ dishId, dishName, recipe }: Props) {
             : amountNum !== undefined && amountNum >= 0 && qtyNum !== undefined && qtyNum > 0
               ? amountNum / qtyNum
               : undefined;
-          return {
-            raw_name: String(row[nameIdx]).trim(),
+          const unit = unitIdx !== -1 ? closestUnit(String(row[unitIdx] ?? '')) : 'KG';
+          if (!unit) {
+            invalidUnits.push(`${rawName}: ${String(row[unitIdx] ?? '')}`);
+            return [];
+          }
+          return [{
+            raw_name: rawName,
             fileCategory: catIdx !== -1 ? normalizeIngredientCategory(String(row[catIdx] ?? '')) : undefined,
             qty: qtyRaw,
-            unit: unitIdx !== -1 ? closestUnit(String(row[unitIdx])) : 'KG',
+            unit,
             fileRate: derivedRate,
             matched: null,
             status: 'resolving' as const,
-          };
+          }];
         });
+
+      if (invalidUnits.length > 0) {
+        toast.error(`Unsupported unit values: ${invalidUnits.slice(0, 5).join(', ')}`);
+        return;
+      }
 
       setBulkRows(parsed);
       await resolveIngredients(parsed);
@@ -588,7 +660,7 @@ export default function IngredientsCard({ dishId, dishName, recipe }: Props) {
             const created: IngredientResult = await api.post('/master/ingredients/', {
               name,
               category:        resolved[i].fileCategory ?? 'OTHER',
-              unit_of_measure: toModelUom(resolved[i].unit),
+              unit_of_measure: toIngredientModelUom(resolved[i].unit),
               unit_cost:       0,
             });
             resolved[i] = { ...resolved[i], matched: created, status: 'ready' };
@@ -644,6 +716,26 @@ export default function IngredientsCard({ dishId, dishName, recipe }: Props) {
   async function handleSave() {
     setSaving(true);
     try {
+      const selectedLines = lines.filter(l => l.ingredient && Number(l.qty_per_unit) > 0);
+      const seenIngredients = new Set<string>();
+      const duplicateNames: string[] = [];
+      for (const line of selectedLines) {
+        if (!line.ingredient) continue;
+        if (seenIngredients.has(line.ingredient)) {
+          const label = (line.ingredient_name || 'Unknown ingredient').trim();
+          if (!duplicateNames.includes(label)) duplicateNames.push(label);
+          continue;
+        }
+        seenIngredients.add(line.ingredient);
+      }
+      if (duplicateNames.length > 0) {
+        toast.error(
+          `Each ingredient can be used only once in a recipe. Remove duplicates: ${duplicateNames.join(', ')}`
+        );
+        setSaving(false);
+        return;
+      }
+
       // PATCH any ingredient categories/rates changed in the recipe editor.
       const origByIngredient = new Map(
         snapshot.lines
@@ -682,8 +774,7 @@ export default function IngredientsCard({ dishId, dishName, recipe }: Props) {
       const payload = {
         batch_size: Number(batchSize) > 0 ? Number(batchSize) : 1,
         batch_unit: batchUnit,
-        lines: lines
-          .filter(l => l.ingredient && Number(l.qty_per_unit) > 0)
+        lines: selectedLines
           .map(l => ({
             ingredient:   l.ingredient,
             qty_per_unit: Number(l.qty_per_unit),
@@ -693,6 +784,12 @@ export default function IngredientsCard({ dishId, dishName, recipe }: Props) {
 
       if (payload.lines.length === 0) {
         toast.error('Add at least one ingredient');
+        setSaving(false);
+        return;
+      }
+
+      if (payload.batch_size <= 1) {
+        toast.error('Batch size looks wrong for a recipe with ingredients. Set the actual batch size, for example 10 for a 10 KG recipe.');
         setSaving(false);
         return;
       }
@@ -743,6 +840,9 @@ export default function IngredientsCard({ dishId, dishName, recipe }: Props) {
   };
   function patchBulkRow(index: number, patch: Partial<BulkRow>) {
     setBulkRows(prev => prev.map((row, i) => (i === index ? { ...row, ...patch } : row)));
+  }
+  function removeBulkRow(index: number) {
+    setBulkRows(prev => prev.filter((_, i) => i !== index));
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -985,6 +1085,7 @@ export default function IngredientsCard({ dishId, dishName, recipe }: Props) {
                     <th className="text-xs font-medium uppercase tracking-wide text-amber-600 pb-2 text-left w-20">Unit</th>
                     <th className="text-xs font-medium uppercase tracking-wide text-amber-600 pb-2 text-right w-24">Rate (₹)</th>
                     <th className="text-xs font-medium uppercase tracking-wide text-amber-600 pb-2 text-right w-28">Amount (₹)</th>
+                    <th className="w-8" />
                   </tr>
                 </thead>
                 <tbody>
@@ -1043,6 +1144,16 @@ export default function IngredientsCard({ dishId, dishName, recipe }: Props) {
                       </td>
                       <td className="py-2 pr-3 text-sm text-gray-700 text-right tabular-nums">
                         {row.fileRate !== undefined ? formatMoneyValue(amountFromBulkRow(row)).replace('₹', '') : '—'}
+                      </td>
+                      <td className="py-2 text-right">
+                        <button
+                          type="button"
+                          onClick={() => removeBulkRow(i)}
+                          className="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors"
+                          aria-label="Remove uploaded ingredient"
+                        >
+                          <X size={14} />
+                        </button>
                       </td>
                     </tr>
                   ))}

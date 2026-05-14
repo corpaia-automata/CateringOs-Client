@@ -55,7 +55,7 @@ interface Props {
 
 type Tab = 'manual' | 'bulk';
 
-const UNIT_OPTIONS = ['kg', 'g', 'litre', 'ml', 'piece', 'nos', 'dozen', 'packet', 'box'] as const;
+const UNIT_OPTIONS = ['kg', 'g', 'litre', 'ml', 'piece', 'nos', 'dozen', 'packet', 'box', 'peeled'] as const;
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 

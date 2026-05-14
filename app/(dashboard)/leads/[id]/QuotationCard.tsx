@@ -1,16 +1,45 @@
 'use client';
 
-import { useState, useId, useEffect, useMemo } from 'react';
+import { useState, useId, useEffect, useLayoutEffect, useMemo, useRef, useCallback, memo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  Plus, Pencil, Trash2, UtensilsCrossed, Wrench, ClipboardList,
+  Plus, Pencil, Trash2, UtensilsCrossed, Wrench, ClipboardList, Zap,
   X, ChevronDown, ShieldCheck, RefreshCw, Maximize2, Minimize2,
   CheckCircle2, AlertTriangle, Circle,
   TrendingUp, Send, Info, BadgeCheck,
   History, CheckCheck, PenLine, MailOpen, PhoneCall, FileCheck2, FileText,
   XCircle, Clock, Loader2,
+  Download, Link2,
 } from 'lucide-react';
-import { api } from '@/lib/api';
+import toast from 'react-hot-toast';
+import { api, ApiError } from '@/lib/api';
+import {
+  AddDishInlinePanel,
+  buildDishPickerCategories,
+  DISH_PICKER_UNCATEGORIZED_ID,
+  type ApiDish,
+  type ApiDishCategory,
+} from '@/components/dishes/AddDishInlinePanel';
+
+/** Flatten REST validation / ApiError payloads for inline menu-save feedback. */
+function formatMenuMutationError(error: unknown): string {
+  if (error instanceof ApiError) {
+    const d = error.data;
+    if (typeof d === 'string') return d;
+    if (d && typeof d === 'object') {
+      const detail = (d as { detail?: unknown }).detail;
+      if (typeof detail === 'string') return detail;
+      const rec = d as Record<string, unknown>;
+      for (const v of Object.values(rec)) {
+        if (typeof v === 'string') return v;
+        if (Array.isArray(v) && v.length && typeof v[0] === 'string') return v[0];
+      }
+    }
+    return `Save failed (${error.status})`;
+  }
+  if (error instanceof Error) return error.message;
+  return 'Save failed — please retry';
+}
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -29,6 +58,19 @@ interface Dish {
   unit: string;
   rate: number;
   subtotal: number;
+  batch_size?: number | string;
+  base_recipe_qty?: number | string;
+}
+
+/** Local menu row state (mirrors server `dishes` + add/edit panel state). */
+interface AddedMenuDishEntry {
+  dish: Dish;
+  category: string;
+  quantity: number;
+  pricePerPlate: number;
+  subtotal: number;
+  status: 'DRAFT';
+  masterDish?: ApiDish;
 }
 
 interface Service {
@@ -77,7 +119,110 @@ interface ApiRecipeLine {
 
 interface ApiRecipeResponse {
   exists: boolean;
+  batch_size?: number | string;
+  batch_unit?: string;
   lines: ApiRecipeLine[];
+}
+
+/** Costing row: recipe lines are driven by menu; manual rows are independent (nullable dishId = quote-level). */
+interface DishCostItem {
+  id: string;
+  dishId: string | null;
+  dishName: string;
+  source: 'recipe' | 'manual';
+  category: string;
+  name: string;
+  qty: number;
+  unit: string;
+  rate: number;
+}
+
+const QUOTE_LEVEL_LABEL = 'Quote-level';
+
+/** Same rule as events/services._is_fixed_charge_category — no scaling with dish qty for these ingredients. */
+function isFixedChargeIngredientCategory(raw?: string | null): boolean {
+  const k = String(raw ?? '').trim().toLowerCase();
+  return k === 'rental' || k === 'rentals' || k === 'other' || k === 'others';
+}
+
+function normalizeDishCostCategory(value?: string | null): string {
+  const raw = (value ?? '').trim();
+  if (!raw) return 'Other';
+  return raw
+    .toLowerCase()
+    .replace(/[_-]+/g, ' ')
+    .split(' ')
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function recipeCostRowsFromApi(dish: Dish, recipe: ApiRecipeResponse): DishCostItem[] {
+  const lines = Array.isArray(recipe?.lines) ? recipe.lines : [];
+  const batchSize = Number(dish.batch_size ?? dish.base_recipe_qty ?? recipe?.batch_size) || 1;
+  const dishQty = Number(dish.qty) || 0;
+  return lines.map((line, index) => {
+    const rawCat = (line as { category?: string; ingredient_category?: string }).ingredient_category
+      ?? (line as { category?: string }).category;
+    const scale = isFixedChargeIngredientCategory(rawCat)
+      ? 1
+      : dishQty / batchSize;
+    const qty = scale * (Number(line.qty_per_unit) || 0);
+    const lineUnit = (line.unit || '').toLowerCase();
+    const ingUom = String((line as { ingredient_uom?: string }).ingredient_uom ?? '').toLowerCase();
+    const bulkPricedSmallLine =
+      (lineUnit === 'g' || lineUnit === 'gram') && ingUom === 'kg'
+      || ['ml', 'millilitre', 'milliliter'].includes(lineUnit) && ['litre', 'liter', 'ltr'].includes(ingUom);
+    const snap = Number(line.unit_cost_snapshot) || 0;
+    // gram/ml unit cost conversion: bulk snapshot is ₹ per kg / per litre; qty is in g/ml
+    const rate = bulkPricedSmallLine ? snap / 1000 : snap;
+    return {
+      id: `recipe-${dish.id}-${line.id || index}`,
+      dishId: dish.id,
+      dishName: dish.name,
+      source: 'recipe' as const,
+      category: normalizeDishCostCategory(line.ingredient_category),
+      name: line.ingredient_name,
+      qty,
+      unit: line.unit || line.ingredient_uom || 'unit',
+      rate,
+    };
+  });
+}
+
+function parseCostingRows(snapshot: unknown): DishCostItem[] {
+  const rows = Array.isArray(snapshot)
+    ? snapshot
+    : snapshot && typeof snapshot === 'object' && 'items' in snapshot
+      ? ((snapshot as { items?: unknown[] }).items ?? [])
+      : [];
+
+  return rows
+    .filter((row): row is Record<string, unknown> => Boolean(row && typeof row === 'object'))
+    .map((row, index) => {
+      const rawDid = row.dishId ?? row.dish_id;
+      const dishId = rawDid === null || rawDid === undefined || rawDid === ''
+        ? null
+        : String(rawDid);
+      const src = row.source === 'manual' ? 'manual' as const : 'recipe' as const;
+      return {
+        id: String(row.id ?? `cost-${index}`),
+        dishId,
+        dishName: String(row.dishName ?? row.dish_name ?? QUOTE_LEVEL_LABEL),
+        source: src,
+        category: String(row.category ?? 'Other'),
+        name: String(row.name ?? row.ingredient_name ?? 'Item'),
+        qty: Number(row.qty ?? row.quantity ?? 0) || 0,
+        unit: String(row.unit ?? 'unit'),
+        rate: Number(row.rate ?? row.unit_rate ?? 0) || 0,
+      };
+    })
+    .filter(item => item.name.trim().length > 0);
+}
+
+/** Manual-only rows for hydration (menu drives recipe rows). */
+function manualRowsFromSnapshot(snapshot: unknown): DishCostItem[] {
+  return parseCostingRows(snapshot).filter(i => i.source === 'manual');
 }
 
 // ─── Helpers ─── (mock seed data removed)
@@ -85,7 +230,27 @@ interface ApiRecipeResponse {
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
 function fmtINR(n: number) {
-  return '₹' + n.toLocaleString('en-IN', { maximumFractionDigits: 0 });
+  return '₹' + (Number(n) || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 });
+}
+
+function normalizeDish(d: unknown): Dish {
+  const raw = (d ?? {}) as Record<string, unknown>;
+  // Server returns 'quantity' (string); local cache and new serializer return 'qty' (number).
+  // Read both so data round-trips correctly regardless of which is present.
+  const qty = Number(raw.qty ?? raw.quantity) || 0;
+  return {
+    id: String(raw.id ?? crypto.randomUUID()),
+    name: String(raw.name ?? ''),
+    category: String(raw.category ?? 'Uncategorized'),
+    pricingType: (raw.pricingType as PricingType) ?? 'per plate',
+    statusBadge: (raw.statusBadge as StatusBadge) ?? 'LIVE',
+    qty,
+    unit: String(raw.unit ?? 'plates'),
+    rate: Number(raw.rate) || 0,
+    subtotal: Number(raw.subtotal) || 0,
+    batch_size: raw.batch_size as number | string | undefined,
+    base_recipe_qty: raw.base_recipe_qty as number | string | undefined,
+  };
 }
 
 function fmtDate(d?: string) {
@@ -101,56 +266,14 @@ function inputCls(extra = '') {
   );
 }
 
-// ─── Shared badge sub-components ───────────────────────────────────────────────
+// ─── Master dish → quotation row mapping ─────────────────────────────────────────
 
-const PRICING_TYPE_STYLES: Record<PricingType, string> = {
-  'per plate': 'bg-blue-500/15 text-blue-400 border border-blue-500/25',
-  'per item': 'bg-purple-500/15 text-purple-400 border border-purple-500/25',
-  'per kg': 'bg-teal-500/15 text-teal-400 border border-teal-500/25',
-};
-
-const STATUS_BADGE_STYLES: Record<StatusBadge, string> = {
-  LIVE: 'bg-green-500/15 text-green-400 border border-green-500/25',
-  FIXED: 'bg-orange-500/15 text-orange-400 border border-orange-500/25',
-  DRAFT: 'bg-slate-500/15 text-slate-400 border border-slate-500/25',
-};
-
-function PricingBadge({ type }: { type: PricingType }) {
-  return (
-    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full capitalize ${PRICING_TYPE_STYLES[type]}`}>
-      {type}
-    </span>
-  );
-}
-
-function StatusBadgeChip({ status }: { status: StatusBadge }) {
-  return (
-    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full tracking-wide ${STATUS_BADGE_STYLES[status]}`}>
-      {status}
-    </span>
-  );
-}
-
-// ─── Add-Dish Panel ────────────────────────────────────────────────────────────
-
-interface ApiDishCategory {
-  id: string;
-  name: string;
-  sort_order?: number;
-}
-
-interface ApiDish {
-  id: string;
-  name: string;
-  dish_type: 'recipe' | 'live_counter' | 'fixed_price';
-  veg_non_veg: 'veg' | 'non_veg';
-  serving_unit: 'PLATE' | 'KG' | 'PIECE' | 'LITRE' | 'PORTION';
-  selling_price: number;
-  base_price: number;
-  category: string | null;
-  category_name?: string | null;
-  is_active: boolean;
-}
+const DISH_CARD_BORDER = '#e0e0e0';
+const DISH_NAVY = '#1a1a2e';
+const DISH_BLUE_ACCENT = '#1a6bff';
+const DISH_REMOVE = '#e53935';
+const LIVE_BADGE_BG = '#fef9c3';
+const LIVE_BADGE_TEXT = '#854d0e';
 
 const SERVING_UNIT_MAP: Record<string, { pricingType: PricingType; unit: string }> = {
   PLATE: { pricingType: 'per plate', unit: 'plates' },
@@ -166,292 +289,16 @@ const DISH_TYPE_TO_BADGE: Record<string, StatusBadge> = {
   fixed_price: 'FIXED',
 };
 
-interface AddDishPanelProps {
-  existingIds: Set<string>;
-  onAdd: (dish: Dish) => void;
-  onClose: () => void;
-}
-
-function AddDishPanel({ existingIds, onAdd, onClose }: AddDishPanelProps) {
-  const [categories, setCategories] = useState<ApiDishCategory[]>([]);
-  const [allDishes, setAllDishes] = useState<ApiDish[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [fetchError, setFetchError] = useState(false);
-  const [loadKey, setLoadKey] = useState(0);
-  const [activeCatId, setActiveCatId] = useState('');
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [qty, setQty] = useState(0);
-  const [price, setPrice] = useState(0);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function load() {
-      setLoading(true);
-      setFetchError(false);
-      try {
-        const [catsRaw, dishesRaw] = await Promise.all([
-          api.get('/master/dish-categories/'),
-          api.get('/master/dishes/?page_size=200'),
-        ]);
-        if (cancelled) return;
-        const cats: ApiDishCategory[] = Array.isArray(catsRaw)
-          ? catsRaw : (catsRaw.results ?? []);
-        const dshs: ApiDish[] = Array.isArray(dishesRaw)
-          ? dishesRaw : (dishesRaw.results ?? []);
-        setCategories([...cats].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)));
-        setAllDishes(dshs.filter(d => d.is_active));
-      } catch {
-        if (!cancelled) setFetchError(true);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-
-    load();
-    return () => { cancelled = true; };
-  }, [loadKey]);
-
-  const displayed = activeCatId
-    ? allDishes.filter(d => d.category === activeCatId)
-    : allDishes;
-
-  function selectDish(dish: ApiDish) {
-    if (expandedId === dish.id) { setExpandedId(null); return; }
-    setExpandedId(dish.id);
-    setQty(1);
-    setPrice(Number(dish.selling_price) || Number(dish.base_price) || 0);
-  }
-
-  function commit(dish: ApiDish) {
-    const map = SERVING_UNIT_MAP[dish.serving_unit]
-      ?? { pricingType: 'per plate' as PricingType, unit: 'plates' };
-    onAdd({
-      id: dish.id,
-      name: dish.name,
-      category: dish.category_name ?? 'Uncategorized',
-      pricingType: map.pricingType,
-      statusBadge: (DISH_TYPE_TO_BADGE[dish.dish_type] ?? 'LIVE') as StatusBadge,
-      qty,
-      unit: map.unit,
-      rate: price,
-      subtotal: qty * price,
-    });
-    setExpandedId(null);
-  }
-
-  const unitLabel = (d: ApiDish) => SERVING_UNIT_MAP[d.serving_unit]?.unit ?? 'plates';
-  const unitSingular = (d: ApiDish) => unitLabel(d).replace(/s$/, '');
-  const displayPrice = (d: ApiDish) => Number(d.selling_price) || Number(d.base_price);
-
-  return (
-    <div className="mb-4 rounded-2xl border border-blue-200 bg-white overflow-hidden shadow-sm">
-
-      {/* ── Panel header ── */}
-      <div className="flex items-center gap-3 px-4 py-3 bg-blue-50 border-b border-blue-100">
-        <UtensilsCrossed size={13} className="text-blue-600 shrink-0" />
-        <span className="text-xs font-bold text-blue-700 uppercase tracking-wide flex-1">
-          Select Dish
-        </span>
-
-        {/* Category filter */}
-        <div className="relative">
-          <select
-            value={activeCatId}
-            onChange={e => { setActiveCatId(e.target.value); setExpandedId(null); }}
-            className="appearance-none bg-white border border-slate-200 rounded-lg px-3 py-1.5 pr-7
-                       text-xs font-semibold text-slate-700 focus:outline-none focus:border-blue-400
-                       transition-colors cursor-pointer"
-          >
-            <option value="">All Categories</option>
-            {categories.map(c => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
-          <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-        </div>
-
-        <button
-          onClick={onClose}
-          className="p-1 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
-          title="Close"
-        >
-          <X size={14} />
-        </button>
-      </div>
-
-      {/* ── Body ── */}
-      {loading ? (
-        <div className="flex items-center justify-center gap-2 py-10 text-slate-400">
-          <Loader2 size={18} className="animate-spin" />
-          <span className="text-xs">Loading dishes…</span>
-        </div>
-
-      ) : fetchError ? (
-        <div className="flex flex-col items-center justify-center py-10 gap-2">
-          <p className="text-sm text-slate-500">Failed to load dishes.</p>
-          <button
-            onClick={() => setLoadKey(k => k + 1)}
-            className="text-xs font-semibold text-blue-500 hover:text-blue-700 transition-colors"
-          >
-            Try again
-          </button>
-        </div>
-
-      ) : displayed.length === 0 ? (
-        <div className="py-10 text-center text-sm text-slate-400">
-          {activeCatId ? 'No dishes in this category.' : 'No dishes available.'}
-        </div>
-
-      ) : (
-        <div className="flex flex-col divide-y divide-slate-100 max-h-80 overflow-y-auto">
-          {displayed.map(dish => {
-            const isExpanded = expandedId === dish.id;
-            const alreadyAdded = existingIds.has(dish.id);
-            const dp = displayPrice(dish);
-
-            return (
-              <div key={dish.id}>
-                {/* Dish row */}
-                <button
-                  onClick={() => { if (!alreadyAdded) selectDish(dish); }}
-                  disabled={alreadyAdded}
-                  className={[
-                    'w-full flex items-center justify-between gap-3 px-4 py-3 text-left transition-colors',
-                    isExpanded ? 'bg-blue-50'
-                      : alreadyAdded ? 'opacity-40 cursor-not-allowed'
-                        : 'hover:bg-slate-50',
-                  ].join(' ')}
-                >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    {/* Veg / non-veg indicator */}
-                    <span className={`w-2.5 h-2.5 rounded-sm border-2 shrink-0 ${dish.veg_non_veg === 'veg'
-                        ? 'border-green-500 bg-green-400/30'
-                        : 'border-red-500   bg-red-400/30'
-                      }`} />
-                    <span className="text-sm font-semibold text-slate-800 truncate">{dish.name}</span>
-                    {dish.category_name && (
-                      <span className="text-[11px] text-slate-400 shrink-0 hidden sm:inline">
-                        {dish.category_name}
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="flex items-center gap-2 shrink-0">
-                    {dish.dish_type === 'live_counter' && (
-                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full
-                                       bg-green-500/15 text-green-600 border border-green-500/25">
-                        LIVE
-                      </span>
-                    )}
-                    {dish.dish_type === 'fixed_price' && (
-                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full
-                                       bg-orange-500/15 text-orange-600 border border-orange-500/25">
-                        FIXED
-                      </span>
-                    )}
-                    <span className="text-xs font-bold text-slate-600 tabular-nums">
-                      {dp > 0 ? fmtINR(dp) : '—'}
-                    </span>
-                    {alreadyAdded
-                      ? <span className="text-[10px] text-slate-400 font-semibold">Added</span>
-                      : <ChevronDown size={13} className={`text-slate-400 transition-transform duration-150 ${isExpanded ? 'rotate-180' : ''}`} />
-                    }
-                  </div>
-                </button>
-
-                {/* Inline form */}
-                {isExpanded && (
-                  <div className="px-4 pt-3 pb-4 bg-blue-50/70 border-t border-blue-100">
-
-                    {dish.dish_type === 'live_counter' && (
-                      <div className="flex items-start gap-2 mb-3 px-3 py-2.5 rounded-lg
-                                      bg-amber-50 border border-amber-200">
-                        <AlertTriangle size={13} className="text-amber-500 shrink-0 mt-0.5" />
-                        <p className="text-[11px] text-amber-700 leading-relaxed">
-                          <span className="font-bold">Live Counter</span> — enter the agreed price for this event
-                        </p>
-                      </div>
-                    )}
-
-                    <div className="flex flex-wrap items-end gap-3">
-                      {/* Qty */}
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-1.5">
-                          Qty ({unitLabel(dish)})
-                        </label>
-                        <input
-                          type="number"
-                          min={1}
-                          value={qty}
-                          onChange={e => setQty(Math.max(1, parseInt(e.target.value)))}
-                          className="w-24 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold
-                                     text-slate-800 text-right tabular-nums focus:outline-none
-                                     focus:border-blue-400 transition-colors"
-                        />
-                      </div>
-
-                      {/* Price */}
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-1.5">
-                          Price / {unitSingular(dish)} (₹)
-                        </label>
-                        <input
-                          type="number"
-                          min={0}
-                          step={1}
-                          value={price || ''}
-                          placeholder="0"
-                          onChange={e => setPrice(parseFloat(e.target.value) || 0)}
-                          className="w-28 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold
-                                     text-slate-800 text-right tabular-nums focus:outline-none
-                                     focus:border-blue-400 transition-colors"
-                        />
-                      </div>
-
-                      {/* Live subtotal */}
-                      <div className="pb-2 text-sm text-slate-400">
-                        =&nbsp;
-                        <span className="font-bold text-slate-700 tabular-nums">{fmtINR(qty * price)}</span>
-                      </div>
-
-                      {/* Actions */}
-                      <div className="flex items-center gap-2 ml-auto">
-                        <button
-                          onClick={() => setExpandedId(null)}
-                          className="px-3 py-2 rounded-lg text-xs font-bold text-slate-500
-                                     border border-slate-200 hover:border-slate-300 hover:text-slate-700 transition-colors"
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          onClick={() => commit(dish)}
-                          disabled={qty < 1 || price <= 0}
-                          className="px-4 py-2 rounded-lg text-xs font-bold bg-blue-600 text-white
-                                     hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                        >
-                          Add to Menu
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ─── Menu Tab ──────────────────────────────────────────────────────────────────
 
 interface MenuTabProps {
+  quotationId: string | null;
   dishes: Dish[];
   services: Service[];
   isSaving: boolean;
-  saveError: boolean;
+  /** Server / client error message after add/update/remove menu rows; null when none. */
+  saveError: string | null;
+  guestCount?: number;
   onAddDish: (dish: Dish) => void;
   onUpdateDish: (dish: Dish) => void;
   onRemoveDish: (id: string) => void;
@@ -460,46 +307,98 @@ interface MenuTabProps {
   onRemoveService: (id: string) => void;
 }
 
-function DishRow({ dish, onEdit, onRemove }: { dish: Dish; onEdit: (id: string) => void; onRemove: (id: string) => void }) {
-  return (
-    <tr className="border-b border-white/50 group hover:bg-white/3 transition-colors">
-      <td className="py-3 pl-4 pr-3">
-        <p className="text-sm font-semibold text-black leading-snug">{dish.name}</p>
-        <p className="text-[11px] text-slate-500 mt-0.5">{dish.category}</p>
-      </td>
-      <td className="py-3 px-3"><PricingBadge type={dish.pricingType} /></td>
-      <td className="py-3 px-3"><StatusBadgeChip status={dish.statusBadge} /></td>
-      <td className="py-3 px-3 text-right">
-        <span className="text-sm text-black tabular-nums">
-          {dish.qty.toLocaleString('en-IN')}&nbsp;
-          <span className="text-slate-500 text-xs">{dish.unit}</span>
-          &nbsp;×&nbsp;{fmtINR(dish.rate)}
+function MenuDishCard({
+  dish,
+  onEdit,
+  onRemove,
+}: {
+  dish: Dish;
+  onEdit: (id: string) => void;
+  onRemove: (id: string) => void;
+}) {
+  function statusPill() {
+    const s = dish.statusBadge;
+    if (s === 'LIVE') {
+      return (
+        <span
+          className="inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide"
+          style={{ backgroundColor: LIVE_BADGE_BG, color: LIVE_BADGE_TEXT }}
+        >
+          <Zap size={11} strokeWidth={2.5} className="shrink-0" aria-hidden />
+          LIVE
         </span>
-      </td>
-      <td className="py-3 px-3 text-right">
-        <span className="text-sm font-semibold text-black tabular-nums">{fmtINR(dish.subtotal)}</span>
-      </td>
-      <td className="py-3 pl-3 pr-4 text-right">
-        <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-          <button onClick={() => onEdit(dish.id)}
-            className="p-1.5 rounded-lg text-blue-400 transition-colors" title="Edit">
-            <Pencil size={13} />
-          </button>
-          <button onClick={() => onRemove(dish.id)}
-            className="p-1.5 rounded-lg text-red-400  transition-colors" title="Remove">
-            <Trash2 size={13} />
-          </button>
+      );
+    }
+    if (s === 'DRAFT') {
+      return (
+        <span className="inline-flex rounded-full bg-neutral-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-neutral-600">
+          DRAFT
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex rounded-full bg-neutral-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-neutral-600">
+        FIXED
+      </span>
+    );
+  }
+
+  return (
+    <div
+      className="flex flex-col gap-4 rounded-xl border bg-white p-4 sm:flex-row sm:items-center sm:gap-6"
+      style={{ borderColor: DISH_CARD_BORDER }}
+    >
+      <div className="min-w-0 flex-1">
+        <p className="font-bold leading-snug" style={{ color: DISH_NAVY, fontSize: 15 }}>
+          {dish.name}
+        </p>
+        <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1.5">
+          <span className="text-[11px] text-neutral-500">{dish.category}</span>
+          <span className="text-[11px] font-semibold capitalize" style={{ color: DISH_BLUE_ACCENT }}>
+            {dish.pricingType}
+          </span>
+          {statusPill()}
         </div>
-      </td>
-    </tr>
+      </div>  
+
+      <div className="shrink-0 text-left sm:text-right">
+        <p className="text-sm font-medium tabular-nums" style={{ color: DISH_NAVY }}>
+          {(dish.qty ?? 0).toLocaleString('en-IN')} {dish.unit} × {fmtINR(dish.rate ?? 0)}
+        </p>
+        <p className="mt-1 text-xs text-neutral-500 tabular-nums">
+          Subtotal: {fmtINR(dish.subtotal ?? 0)}
+        </p>
+      </div>
+
+      <div className="flex shrink-0 flex-col items-end justify-center gap-1 sm:ml-auto">
+        <button
+          type="button"
+          onClick={() => onEdit(dish.id)}
+          className="text-[10px] font-bold uppercase tracking-wide hover:opacity-80"
+          style={{ color: DISH_BLUE_ACCENT }}
+        >
+          EDIT
+        </button>
+        <button
+          type="button"
+          onClick={() => onRemove(dish.id)}
+          className="text-[10px] font-bold uppercase tracking-wide hover:opacity-80"
+          style={{ color: DISH_REMOVE }}
+        >
+          REMOVE
+        </button>
+      </div>
+    </div>
   );
 }
 
-function MenuTab({
+const MenuTab = memo(function MenuTab({
+  quotationId,
   dishes,
   services,
   isSaving,
   saveError,
+  guestCount,
   onAddDish,
   onUpdateDish,
   onRemoveDish,
@@ -507,41 +406,121 @@ function MenuTab({
   onUpdateService,
   onRemoveService,
 }: MenuTabProps) {
-  const [showAddPanel, setShowAddPanel] = useState(false);
+  const guestQtyDefault = useMemo(() => Math.max(1, guestCount ?? 1), [guestCount]);
+
+  const [showAddDish, setShowAddDish] = useState(false);
+  const [categoriesCatalog, setCategoriesCatalog] = useState<ApiDishCategory[]>([]);
+  const [selectedCategory, setSelectedCategory] = useState<ApiDishCategory | null>(null);
+  const [selectedDish, setSelectedDish] = useState<ApiDish | null>(null);
+  const [quantity, setQuantity] = useState(guestQtyDefault);
+  const [pricePerPlate, setPricePerPlate] = useState(0);
+  const [addedDishes, setAddedDishes] = useState<AddedMenuDishEntry[]>([]);
+  const [editingMenuDishId, setEditingMenuDishId] = useState<string | null>(null);
+
   const [showAddService, setShowAddService] = useState(false);
-  const [editingDishId, setEditingDishId] = useState<string | null>(null);
-  const [dishQty, setDishQty] = useState<number>(1);
-  const [dishRate, setDishRate] = useState<number>(0);
   const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
   const [svcName, setSvcName] = useState('');
   const [svcPrice, setSvcPrice] = useState<number | ''>('');
-  const existingIds = useMemo(() => new Set(dishes.map(d => d.id)), [dishes]);
 
-  function openDishEdit(dishId: string) {
-    const dish = dishes.find(d => d.id === dishId);
-    if (!dish) return;
-    setEditingDishId(dishId);
-    setDishQty(dish.qty);
-    setDishRate(dish.rate);
+  useEffect(() => {
+    setQuantity(guestQtyDefault);
+  }, [guestQtyDefault]);
+
+  // Track which quotation we last synced from so that cache updates / background
+  // refetches after an add/edit never overwrite the optimistic local state.
+  // We only reinitialize when the quotation identity itself changes (e.g. first
+  // load, or the user navigates to a different lead).
+  const syncedQuotationIdRef = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (syncedQuotationIdRef.current === quotationId) return;
+    syncedQuotationIdRef.current = quotationId;
+    setAddedDishes(
+      dishes.map(d => ({
+        dish: d,
+        category: d.category,
+        quantity: d.qty,
+        pricePerPlate: d.rate,
+        subtotal: d.subtotal,
+        status: 'DRAFT' as const,
+      })),
+    );
+  // dishes must be in the dep array so the effect sees the loaded data when
+  // quotationId first becomes non-null and dishes arrive in the same render.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quotationId, dishes]);
+
+  useEffect(() => {
+    if (!showAddDish || editingMenuDishId) return;
+    setQuantity(guestQtyDefault);
+    setPricePerPlate(0);
+    setSelectedDish(null);
+  }, [showAddDish, editingMenuDishId, guestQtyDefault]);
+
+  const handleCategoriesLoaded = useCallback((cats: ApiDishCategory[]) => {
+    setCategoriesCatalog(cats);
+    setSelectedCategory(prev =>
+      prev && cats.some(c => c.id === prev.id) ? prev : cats[0] ?? null,
+    );
+  }, []);
+
+  function resetAddDishForm() {
+    setSelectedDish(null);
+    setPricePerPlate(0);
+    setQuantity(guestQtyDefault);
+    setEditingMenuDishId(null);
   }
 
-  function cancelDishEdit() {
-    setEditingDishId(null);
-    setDishQty(1);
-    setDishRate(0);
+  async function openDishPanelForEdit(dishId: string) {
+    const entry = addedDishes.find(e => e.dish.id === dishId);
+    if (!entry) return;
+    let cats = categoriesCatalog;
+    if (cats.length === 0) {
+      try {
+        const [catsRaw, dishesRaw] = await Promise.all([
+          api.get('/categories/'),
+          api.get('/master/dishes/?page_size=200'),
+        ]);
+        const list: ApiDishCategory[] = Array.isArray(catsRaw)
+          ? catsRaw
+          : (catsRaw.results ?? []);
+        const dshs: ApiDish[] = Array.isArray(dishesRaw)
+          ? dishesRaw
+          : (dishesRaw.results ?? []);
+        cats = buildDishPickerCategories(list, dshs.filter(d => d.is_active));
+        setCategoriesCatalog(cats);
+      } catch {
+        toast.error('Could not load categories');
+        return;
+      }
+    }
+    let md = entry.masterDish ?? null;
+    if (!md) {
+      try {
+        md = (await api.get(`/master/dishes/${dishId}/`)) as ApiDish;
+      } catch {
+        toast.error('Could not load dish details');
+        return;
+      }
+    }
+    const cat =
+      (md.category
+        ? cats.find(c => c.id === md.category)
+        : cats.find(c => c.id === DISH_PICKER_UNCATEGORIZED_ID))
+      ?? cats[0]
+      ?? null;
+    setSelectedCategory(cat);
+    setSelectedDish(md);
+    setQuantity(entry.quantity);
+    setPricePerPlate(entry.pricePerPlate);
+    setEditingMenuDishId(dishId);
+    setShowAddDish(true);
   }
 
-  function saveDishEdit(dishId: string) {
-    const original = dishes.find(d => d.id === dishId);
-    if (!original || dishQty < 1 || dishRate <= 0) return;
-    onUpdateDish({
-      ...original,
-      qty: dishQty,
-      rate: dishRate,
-      subtotal: dishQty * dishRate,
-    });
-    cancelDishEdit();
-  }
+  const existingIds = useMemo(() => {
+    const ids = new Set(addedDishes.map(e => e.dish.id));
+    if (editingMenuDishId) ids.delete(editingMenuDishId);
+    return ids;
+  }, [addedDishes, editingMenuDishId]);
 
   function handleAddService() {
     if (!svcName.trim() || !svcPrice || Number(svcPrice) <= 0) return;
@@ -576,11 +555,13 @@ function MenuTab({
     setSvcPrice(svc.rate);
   }
 
-  const menuTotal = dishes.reduce((s, d) => s + d.subtotal, 0)
+  const menuTotal =
+    addedDishes.reduce((s, e) => s + e.dish.subtotal, 0)
     + services.reduce((s, sv) => s + sv.subtotal, 0);
 
-  function handleAddDish(dish: Dish) {
-    onAddDish(dish);
+  function removeAddedDish(dishId: string) {
+    setAddedDishes(prev => prev.filter(e => e.dish.id !== dishId));
+    onRemoveDish(dishId);
   }
 
   return (
@@ -592,19 +573,26 @@ function MenuTab({
             <UtensilsCrossed size={15} className="text-blue-700" />
             <span className="text-sm font-bold text-black">Dishes</span>
             <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-blue-700/15 text-blue-700 border border-blue-700/20 tabular-nums">
-              {dishes.length}
+              {addedDishes.length}
             </span>
           </div>
           <button
-            onClick={() => setShowAddPanel(p => !p)}
+            type="button"
+            onClick={() => {
+              setShowAddDish(prev => {
+                const next = !prev;
+                if (!next) resetAddDishForm();
+                return next;
+              });
+            }}
             className={[
               'flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-colors',
-              showAddPanel
+              showAddDish
                 ? 'bg-slate-100 text-slate-600 border border-slate-200 hover:bg-slate-200'
                 : 'bg-blue-500/15 text-blue-700 border border-blue-500/20 hover:bg-blue-500/25',
             ].join(' ')}
           >
-            {showAddPanel
+            {showAddDish
               ? <><X size={13} /> Cancel</>
               : <><Plus size={13} /> Add Dish</>
             }
@@ -612,102 +600,93 @@ function MenuTab({
         </div>
 
         {/* ── Add Dish Panel ── */}
-        {showAddPanel && (
-          <AddDishPanel
+        {showAddDish && (
+          <AddDishInlinePanel
             existingIds={existingIds}
-            onAdd={handleAddDish}
-            onClose={() => setShowAddPanel(false)}
+            submitting={isSaving}
+            defaultGuestQty={guestCount != null && guestCount > 0 ? guestCount : undefined}
+            controlled={{
+              selectedCategoryId: selectedCategory?.id ?? '',
+              onSelectedCategoryIdChange: id =>
+                setSelectedCategory(categoriesCatalog.find(c => c.id === id) ?? null),
+              selectedDish,
+              onSelectedDishChange: setSelectedDish,
+              quantity,
+              onQuantityChange: setQuantity,
+              pricePerPlate,
+              onPricePerPlateChange: setPricePerPlate,
+            }}
+            onCategoriesLoaded={handleCategoriesLoaded}
+            confirmLabel={editingMenuDishId ? 'Save' : 'Add'}
+            onClose={() => {
+              setShowAddDish(false);
+              resetAddDishForm();
+            }}
+            onConfirmAdd={(apiDish, qty, price) => {
+              const rowId = editingMenuDishId ?? apiDish.id;
+              const map = SERVING_UNIT_MAP[apiDish.serving_unit]
+                ?? { pricingType: 'per plate' as PricingType, unit: 'plates' };
+              const batchSize = Number(apiDish.batch_size) || 1;
+              const row: Dish = {
+                id: rowId,
+                name: apiDish.name,
+                category: apiDish.category_name ?? 'Uncategorized',
+                pricingType: map.pricingType,
+                statusBadge: (DISH_TYPE_TO_BADGE[apiDish.dish_type] ?? 'LIVE') as StatusBadge,
+                qty,
+                unit: map.unit,
+                rate: price,
+                subtotal: qty * price,
+                batch_size: batchSize,
+                base_recipe_qty: batchSize,
+              };
+              const entry: AddedMenuDishEntry = {
+                dish: row,
+                category: row.category,
+                quantity: qty,
+                pricePerPlate: price,
+                subtotal: qty * price,
+                status: 'DRAFT',
+                masterDish: apiDish,
+              };
+              setAddedDishes(prev =>
+                editingMenuDishId
+                  ? prev.map(e => (e.dish.id === editingMenuDishId ? entry : e))
+                  : [...prev, entry],
+              );
+              if (editingMenuDishId) {
+                onUpdateDish(row);
+              } else {
+                onAddDish(row);
+              }
+            }}
           />
         )}
 
-        {dishes.length === 0 ? (
+        {addedDishes.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 rounded-xl border border-dashed border-white/10">
             <UtensilsCrossed size={28} className="text-slate-600 mb-3" />
             <p className="text-sm text-slate-500 font-medium">No dishes added yet.</p>
-            <button onClick={() => setShowAddPanel(true)}
-              className="mt-3 text-sm font-semibold text-orange-400 hover:text-orange-300 transition-colors">
+            <button
+              type="button"
+              onClick={() => setShowAddDish(true)}
+              className="mt-3 text-sm font-semibold text-orange-400 hover:text-orange-300 transition-colors"
+            >
               Add your first dish →
             </button>
           </div>
         ) : (
-          <div className="rounded-xl overflow-hidden border border-white/8">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-white/8 bg-white/3">
-                  {['Dish', 'Pricing', 'Status', 'Qty × Rate', 'Subtotal', ''].map((h, i) => (
-                    <th key={i}
-                      className={`text-[11px] font-semibold text-slate-500 uppercase tracking-wide py-2.5 px-3
-                        ${i === 0 ? 'text-left pl-4' : i === 5 ? '' : i >= 3 ? 'text-right' : 'text-left'}`}>
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {dishes.map(dish => (
-                  <DishRow key={dish.id} dish={dish}
-                    onEdit={openDishEdit}
-                    onRemove={onRemoveDish} />
-                ))}
-              </tbody>
-            </table>
+          <div className="flex flex-col gap-3">
+            {addedDishes.map(entry => (
+              <MenuDishCard
+                key={entry.dish.id}
+                dish={entry.dish}
+                onEdit={openDishPanelForEdit}
+                onRemove={removeAddedDish}
+              />
+            ))}
           </div>
         )}
-        {editingDishId && (() => {
-          const currentDish = dishes.find(d => d.id === editingDishId);
-          if (!currentDish) return null;
-          return (
-            <div className="mt-4 rounded-2xl border border-blue-200 bg-blue-50 p-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-                <div className="lg:col-span-2">
-                  <p className="text-xs font-semibold text-slate-600 mb-1">Editing Dish</p>
-                  <p className="text-sm font-bold text-slate-900">{currentDish.name}</p>
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-1.5">Qty</label>
-                  <input
-                    type="number"
-                    min={1}
-                    value={dishQty}
-                    onChange={e => setDishQty(Math.max(1, Number(e.target.value) || 1))}
-                    className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-right"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-1.5">Price / Plate (₹)</label>
-                  <input
-                    type="number"
-                    min={1}
-                    value={dishRate}
-                    onChange={e => setDishRate(Math.max(1, Number(e.target.value) || 0))}
-                    className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-right"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-1.5">Subtotal</label>
-                  <div className="px-3 py-2 text-sm font-bold text-right rounded-lg bg-white border border-slate-200 tabular-nums">
-                    {fmtINR(dishQty * dishRate)}
-                  </div>
-                </div>
-              </div>
-              <div className="mt-3 flex items-center justify-end gap-2">
-                <button
-                  onClick={cancelDishEdit}
-                  className="px-4 py-2 rounded-lg text-xs font-bold border border-slate-300 text-slate-600 hover:bg-slate-100 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => saveDishEdit(currentDish.id)}
-                  disabled={dishQty < 1 || dishRate <= 0}
-                  className="px-4 py-2 rounded-lg text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                >
-                  Save
-                </button>
-              </div>
-            </div>
-          );
-        })()}
       </div>
 
       <div className="border-t border-white/6 mx-5" />
@@ -840,14 +819,14 @@ function MenuTab({
             </span>
           )}
           {saveError && (
-            <span className="text-xs text-red-400">Save failed — please retry</span>
+            <span className="text-xs text-red-400 max-w-[min(420px,70vw)] text-right">{saveError}</span>
           )}
           <span className="text-lg font-bold text-white tabular-nums">{fmtINR(menuTotal)}</span>
         </div>
       </div>
     </div>
   );
-}
+});
 
 // ─── Costing Tab ──────────────────────────────────────────────────────────────
 
@@ -1199,18 +1178,6 @@ function CostingTab({ leadId, items, setItems }: CostingTabProps) {
   );
 }
 
-interface DishCostItem {
-  id: string;
-  dishId: string;
-  dishName: string;
-  source: 'recipe' | 'manual';
-  category: string;
-  name: string;
-  qty: number;
-  unit: string;
-  rate: number;
-}
-
 const DISH_COST_BLANK_FORM = {
   dishId: '',
   category: 'Other',
@@ -1220,25 +1187,17 @@ const DISH_COST_BLANK_FORM = {
   rate: 0,
 };
 
-function normalizeDishCostCategory(value?: string | null): string {
-  const raw = (value ?? '').trim();
-  if (!raw) return 'Other';
-  return raw
-    .toLowerCase()
-    .replace(/[_-]+/g, ' ')
-    .split(' ')
-    .filter(Boolean)
-    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ');
-}
+const QUOTE_LEVEL_FORM_VALUE = '__quote_level__';
 
 interface CostingTabByDishProps {
   dishes: Dish[];
   items: DishCostItem[];
   setItems: React.Dispatch<React.SetStateAction<DishCostItem[]>>;
+  /** Shown when manual costs need review (e.g. all dishes removed but manual lines remain). */
+  manualReviewWarning: string | null;
 }
 
-function CostingTabByDish({ dishes, items, setItems }: CostingTabByDishProps) {
+function CostingTabByDish({ dishes, items, setItems, manualReviewWarning }: CostingTabByDishProps) {
   const uid = useId();
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(DISH_COST_BLANK_FORM);
@@ -1248,10 +1207,12 @@ function CostingTabByDish({ dishes, items, setItems }: CostingTabByDishProps) {
 
   const computedTotal = form.qty * form.rate;
   const grandTotal = items.reduce((s, i) => s + i.qty * i.rate, 0);
+  const totalRecipe = items.filter(i => i.source === 'recipe').reduce((s, i) => s + i.qty * i.rate, 0);
+  const totalManual = items.filter(i => i.source === 'manual').reduce((s, i) => s + i.qty * i.rate, 0);
   const dishMap = useMemo(() => new Map(dishes.map(d => [d.id, d])), [dishes]);
 
-  const groupedByDish = useMemo(() => {
-    return dishes.map(dish => {
+  const { groupedByDish, quoteLevelManual, orphanManual } = useMemo(() => {
+    const byDish = dishes.map(dish => {
       const dishItems = items.filter(item => item.dishId === dish.id);
       return {
         dish,
@@ -1259,18 +1220,31 @@ function CostingTabByDish({ dishes, items, setItems }: CostingTabByDishProps) {
         dishTotal: dishItems.reduce((sum, item) => sum + item.qty * item.rate, 0),
       };
     });
-  }, [dishes, items]);
+    const quoteLevel = items.filter(
+      i => i.source === 'manual' && (i.dishId == null || i.dishId === ''),
+    );
+    const orphan = items.filter(
+      i => i.source === 'manual' && i.dishId != null && i.dishId !== '' && !dishMap.has(i.dishId),
+    );
+    return { groupedByDish: byDish, quoteLevelManual: quoteLevel, orphanManual: orphan };
+  }, [dishes, items, dishMap]);
 
   function openAddForm(dishId?: string) {
     setEditId(null);
-    setForm({ ...DISH_COST_BLANK_FORM, dishId: dishId ?? dishes[0]?.id ?? '' });
+    if (dishId) {
+      setForm({ ...DISH_COST_BLANK_FORM, dishId });
+    } else if (dishes.length > 0) {
+      setForm({ ...DISH_COST_BLANK_FORM, dishId: dishes[0].id });
+    } else {
+      setForm({ ...DISH_COST_BLANK_FORM, dishId: QUOTE_LEVEL_FORM_VALUE });
+    }
     setShowForm(true);
   }
 
   function openEditForm(item: DishCostItem) {
     setEditId(item.id);
     setForm({
-      dishId: item.dishId,
+      dishId: item.dishId == null || item.dishId === '' ? QUOTE_LEVEL_FORM_VALUE : item.dishId,
       category: item.category,
       name: item.name,
       qty: item.qty,
@@ -1287,12 +1261,14 @@ function CostingTabByDish({ dishes, items, setItems }: CostingTabByDishProps) {
   }
 
   function handleSave() {
-    if (!form.dishId || !form.name.trim() || form.qty <= 0 || form.rate < 0) return;
-    const linkedDish = dishMap.get(form.dishId);
-    if (!linkedDish) return;
+    if (!form.name.trim() || form.qty <= 0 || form.rate < 0) return;
+    const isQuoteLevel = form.dishId === QUOTE_LEVEL_FORM_VALUE || form.dishId === '';
+    if (!isQuoteLevel && !dishMap.get(form.dishId)) return;
+
+    const linkedDish = isQuoteLevel ? null : dishMap.get(form.dishId);
     const nextPayload: Omit<DishCostItem, 'id'> = {
-      dishId: form.dishId,
-      dishName: linkedDish.name,
+      dishId: isQuoteLevel ? null : form.dishId,
+      dishName: linkedDish ? linkedDish.name : QUOTE_LEVEL_LABEL,
       source: editId ? (items.find(i => i.id === editId)?.source ?? 'manual') : 'manual',
       category: normalizeDishCostCategory(form.category),
       name: form.name.trim(),
@@ -1324,25 +1300,17 @@ function CostingTabByDish({ dishes, items, setItems }: CostingTabByDishProps) {
     setSyncing(true);
     setSyncError('');
     try {
-      const recipeItemsByDish = await Promise.all(dishes.map(async (dish) => {
-        const recipe = await api.get(`/master/dishes/${dish.id}/recipe/`) as ApiRecipeResponse;
-        const lines = Array.isArray(recipe?.lines) ? recipe.lines : [];
-        return lines.map((line, index) => ({
-          id: `recipe-${dish.id}-${line.id || index}`,
-          dishId: dish.id,
-          dishName: dish.name,
-          source: 'recipe' as const,
-          category: normalizeDishCostCategory(line.ingredient_category),
-          name: line.ingredient_name,
-          qty: (Number(dish.qty) || 0) * (Number(line.qty_per_unit) || 0),
-          unit: line.unit || line.ingredient_uom || 'unit',
-          rate: Number(line.unit_cost_snapshot) || 0,
-        }));
-      }));
+      const recipeItemsByDish = await Promise.all(
+        dishes.map(async (dish) => {
+          const recipe = await api.get(`/master/dishes/${dish.id}/recipe/`) as ApiRecipeResponse;
+          return recipeCostRowsFromApi(dish, recipe);
+        }),
+      );
       const recipeItems = recipeItemsByDish.flat();
-      const activeDishIds = new Set(dishes.map(d => d.id));
-      const manualItems = items.filter(item => item.source === 'manual' && activeDishIds.has(item.dishId));
-      setItems([...recipeItems, ...manualItems]);
+      setItems(prev => {
+        const manualItems = prev.filter(i => i.source === 'manual');
+        return [...recipeItems, ...manualItems];
+      });
     } catch {
       setSyncError('Unable to sync dish ingredients right now. Please retry.');
     } finally {
@@ -1350,17 +1318,68 @@ function CostingTabByDish({ dishes, items, setItems }: CostingTabByDishProps) {
     }
   }
 
-  useEffect(() => {
-    if (dishes.length === 0) return;
-    const activeDishIds = new Set(dishes.map(d => d.id));
-    setItems(prev => prev
-      .filter(item => activeDishIds.has(item.dishId))
-      .map(item => {
-        const latestDish = dishMap.get(item.dishId);
-        if (!latestDish) return item;
-        return { ...item, dishName: latestDish.name };
-      }));
-  }, [dishMap, dishes, setItems]);
+  function renderCostingTableRows(
+    dishItems: DishCostItem[],
+    emptyMessage: string,
+  ) {
+    if (dishItems.length === 0) {
+      return (
+        <tr>
+          <td colSpan={6} className="py-6 text-center text-sm text-slate-500">
+            {emptyMessage}
+          </td>
+        </tr>
+      );
+    }
+    return dishItems.map(item => (
+      <tr key={item.id} className="border-b border-white/5 last:border-0 group hover:bg-white/3 transition-colors">
+        <td className="py-2.5 pl-4 pr-3 text-sm font-medium text-black">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span>{item.name}</span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200">
+              {item.source === 'recipe' ? 'recipe' : 'manual'}
+            </span>
+            <span className="text-[10px] text-slate-500">{item.category}</span>
+          </div>
+        </td>
+        <td className="py-2.5 px-3 text-right text-sm text-slate-700 tabular-nums">
+          {item.qty.toLocaleString('en-IN', { maximumFractionDigits: 3 })}
+        </td>
+        <td className="py-2.5 px-3 text-sm text-slate-600">{item.unit}</td>
+        <td className="py-2.5 px-3 text-right">
+          <input
+            type="number"
+            min={0}
+            step={1}
+            value={item.rate}
+            onChange={e => handleRateChange(item.id, parseFloat(e.target.value) || 0)}
+            className="w-24 bg-white border border-slate-200 rounded-md px-2 py-1 text-sm text-right tabular-nums"
+          />
+        </td>
+        <td className="py-2.5 px-3 text-right text-sm font-bold text-black tabular-nums">{fmtINR(item.qty * item.rate)}</td>
+        <td className="py-2.5 pl-2 pr-3 text-right">
+          <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button
+              type="button"
+              onClick={() => openEditForm(item)}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-blue-400 hover:bg-blue-500/10 transition-colors"
+              title="Edit"
+            >
+              <Pencil size={12} />
+            </button>
+            <button
+              type="button"
+              onClick={() => handleRemove(item.id)}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+              title="Delete"
+            >
+              <Trash2 size={12} />
+            </button>
+          </div>
+        </td>
+      </tr>
+    ));
+  }
 
   return (
     <div className="flex flex-col">
@@ -1370,10 +1389,13 @@ function CostingTabByDish({ dishes, items, setItems }: CostingTabByDishProps) {
             <ClipboardList size={15} className="text-yellow-400" />
             <span className="text-sm font-bold text-black">Internal Costing Sheet</span>
           </div>
-          <p className="text-[11px] text-slate-500 pl-5.75">Dish-wise ingredient costing — linked to recipes</p>
+          <p className="text-[11px] text-slate-500 pl-5.75">
+            Recipe costs follow the menu; manual lines (rentals, labour, misc.) stay until you remove them.
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <button
+            type="button"
             onClick={() => void handleSyncFromDishes()}
             disabled={syncing || dishes.length === 0}
             className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold
@@ -1383,14 +1405,24 @@ function CostingTabByDish({ dishes, items, setItems }: CostingTabByDishProps) {
             <RefreshCw size={12} className={syncing ? 'animate-spin' : ''} />
             Sync from Dishes
           </button>
-          <button onClick={() => openAddForm()} disabled={dishes.length === 0}
+          <button
+            type="button"
+            onClick={() => openAddForm()}
             className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold
-                     bg-yellow-500/15 text-yellow-400 border border-yellow-500/20 hover:bg-yellow-500/25 transition-colors
-                     disabled:opacity-40 disabled:cursor-not-allowed">
+                     bg-yellow-500/15 text-yellow-400 border border-yellow-500/20 hover:bg-yellow-500/25 transition-colors"
+          >
             <Plus size={13} /> Add Item
           </button>
         </div>
       </div>
+      {manualReviewWarning && (
+        <div
+          className="mx-5 mt-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900"
+        >
+          <AlertTriangle className="shrink-0 mt-0.5" size={16} />
+          <span>{manualReviewWarning}</span>
+        </div>
+      )}
       {syncError && <p className="px-5 pt-3 text-[11px] text-red-500">{syncError}</p>}
 
       {showForm && (
@@ -1399,18 +1431,21 @@ function CostingTabByDish({ dishes, items, setItems }: CostingTabByDishProps) {
             <span className="text-xs font-bold text-yellow-400 uppercase tracking-wide">
               {editId ? 'Edit Item' : 'New Item'}
             </span>
-            <button onClick={handleCancel} className="text-slate-500 hover:text-slate-300 transition-colors">
+            <button type="button" onClick={handleCancel} className="text-slate-500 hover:text-slate-300 transition-colors">
               <X size={14} />
             </button>
           </div>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <div className="col-span-2 sm:col-span-1">
-              <label htmlFor={`${uid}-dish`} className="block text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Dish</label>
+              <label htmlFor={`${uid}-dish`} className="block text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Dish (optional for quote-level)</label>
               <div className="relative">
-                <select id={`${uid}-dish`} value={form.dishId}
+                <select
+                  id={`${uid}-dish`}
+                  value={form.dishId === '' ? QUOTE_LEVEL_FORM_VALUE : form.dishId}
                   onChange={e => setForm(f => ({ ...f, dishId: e.target.value }))}
-                  className={inputCls('appearance-none pr-8 cursor-pointer')}>
-                  <option value="" className="bg-slate-900">Select Dish</option>
+                  className={inputCls('appearance-none pr-8 cursor-pointer')}
+                >
+                  <option value={QUOTE_LEVEL_FORM_VALUE} className="bg-slate-900">{QUOTE_LEVEL_LABEL} (rentals, labour, misc.)</option>
                   {dishes.map(dish => (
                     <option key={dish.id} value={dish.id} className="bg-slate-900">{dish.name}</option>
                   ))}
@@ -1460,8 +1495,12 @@ function CostingTabByDish({ dishes, items, setItems }: CostingTabByDishProps) {
                 className="px-3 py-1.5 rounded-xl text-xs font-bold text-slate-400 border border-white/10 hover:border-white/20 hover:text-white transition-colors">
                 Cancel
               </button>
-              <button onClick={handleSave} disabled={!form.dishId || !form.name.trim() || form.qty <= 0}
-                className="px-3 py-1.5 rounded-xl text-xs font-bold bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 hover:bg-yellow-500/30 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={!form.name.trim() || form.qty <= 0}
+                className="px-3 py-1.5 rounded-xl text-xs font-bold bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 hover:bg-yellow-500/30 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
                 {editId ? 'Update Item' : 'Save Item'}
               </button>
             </div>
@@ -1469,11 +1508,11 @@ function CostingTabByDish({ dishes, items, setItems }: CostingTabByDishProps) {
         </div>
       )}
 
-      {dishes.length === 0 && (
+      {dishes.length === 0 && items.length === 0 && !showForm && (
         <div className="flex flex-col items-center justify-center py-14 text-center">
           <ClipboardList size={30} className="text-slate-700 mb-3" />
           <p className="text-sm text-slate-500 font-medium">No dishes in menu.</p>
-          <p className="text-xs text-slate-600 mt-1">Add dishes in Menu tab first to build internal costing sheet.</p>
+          <p className="text-xs text-slate-600 mt-1">Add dishes in the Menu tab for recipe costs, or add quote-level manual costs below.</p>
         </div>
       )}
 
@@ -1481,28 +1520,34 @@ function CostingTabByDish({ dishes, items, setItems }: CostingTabByDishProps) {
         <div className="flex flex-col items-center justify-center py-14 text-center">
           <ClipboardList size={30} className="text-slate-700 mb-3" />
           <p className="text-sm text-slate-500 font-medium">No internal costing items yet.</p>
-          <p className="text-xs text-slate-600 mt-1">Sync ingredients from dishes to start dish-wise costing.</p>
-          <button onClick={() => void handleSyncFromDishes()}
-            className="mt-4 text-sm font-semibold text-blue-600 hover:text-blue-700 transition-colors">
+          <p className="text-xs text-slate-600 mt-1">Recipe lines are added when you add dishes; use Sync to refresh from recipes.</p>
+          <button
+            type="button"
+            onClick={() => void handleSyncFromDishes()}
+            className="mt-4 text-sm font-semibold text-blue-600 hover:text-blue-700 transition-colors"
+          >
             Sync now
           </button>
         </div>
       )}
 
-      {groupedByDish.some(group => group.dishItems.length > 0) && (
+      {(groupedByDish.some(group => group.dishItems.length > 0)
+        || quoteLevelManual.length > 0
+        || orphanManual.length > 0) && (
         <div className="px-5 pt-4 pb-2 flex flex-col gap-5">
           {groupedByDish.map(({ dish, dishItems, dishTotal }) => (
             <div key={dish.id} className="rounded-xl border border-white/8 overflow-hidden">
               <div className="flex items-center justify-between gap-3 px-4 py-3 bg-slate-50 border-b border-white/8">
                 <div>
                   <p className="text-sm font-bold text-black">{dish.name}</p>
-                  <p className="text-[11px] text-slate-600 mt-0.5">Dish Qty: {dish.qty.toLocaleString('en-IN')} {dish.unit}</p>
+                  <p className="text-[11px] text-slate-600 mt-0.5">Dish Qty: {(dish.qty ?? 0).toLocaleString('en-IN')} {dish.unit}</p>
                 </div>
                 <div className="flex items-center gap-3">
                   <span className="text-[11px] text-slate-600 tabular-nums">
                     {dishItems.length} item{dishItems.length !== 1 ? 's' : ''}
                   </span>
                   <button
+                    type="button"
                     onClick={() => openAddForm(dish.id)}
                     className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-yellow-500/15 text-yellow-600 border border-yellow-500/20 hover:bg-yellow-500/25 transition-colors"
                   >
@@ -1523,52 +1568,7 @@ function CostingTabByDish({ dishes, items, setItems }: CostingTabByDishProps) {
                     </tr>
                   </thead>
                   <tbody>
-                    {dishItems.length === 0 ? (
-                      <tr>
-                        <td colSpan={6} className="py-6 text-center text-sm text-slate-500">
-                          No ingredients or extras added for this dish.
-                        </td>
-                      </tr>
-                    ) : dishItems.map(item => (
-                      <tr key={item.id} className="border-b border-white/5 last:border-0 group hover:bg-white/3 transition-colors">
-                        <td className="py-2.5 pl-4 pr-3 text-sm font-medium text-black">
-                          <div className="flex items-center gap-2">
-                            <span>{item.name}</span>
-                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200">
-                              {item.source === 'recipe' ? 'recipe' : 'manual'}
-                            </span>
-                            <span className="text-[10px] text-slate-500">{item.category}</span>
-                          </div>
-                        </td>
-                        <td className="py-2.5 px-3 text-right text-sm text-slate-700 tabular-nums">
-                          {item.qty.toLocaleString('en-IN', { maximumFractionDigits: 3 })}
-                        </td>
-                        <td className="py-2.5 px-3 text-sm text-slate-600">{item.unit}</td>
-                        <td className="py-2.5 px-3 text-right">
-                          <input
-                            type="number"
-                            min={0}
-                            step={1}
-                            value={item.rate}
-                            onChange={e => handleRateChange(item.id, parseFloat(e.target.value) || 0)}
-                            className="w-24 bg-white border border-slate-200 rounded-md px-2 py-1 text-sm text-right tabular-nums"
-                          />
-                        </td>
-                        <td className="py-2.5 px-3 text-right text-sm font-bold text-black tabular-nums">{fmtINR(item.qty * item.rate)}</td>
-                        <td className="py-2.5 pl-2 pr-3 text-right">
-                          <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button onClick={() => openEditForm(item)}
-                              className="p-1.5 rounded-lg text-slate-400 hover:text-blue-400 hover:bg-blue-500/10 transition-colors" title="Edit">
-                              <Pencil size={12} />
-                            </button>
-                            <button onClick={() => handleRemove(item.id)}
-                              className="p-1.5 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-colors" title="Delete">
-                              <Trash2 size={12} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                    {renderCostingTableRows(dishItems, 'No ingredients or extras added for this dish.')}
                   </tbody>
                 </table>
               </div>
@@ -1578,16 +1578,86 @@ function CostingTabByDish({ dishes, items, setItems }: CostingTabByDishProps) {
               </div>
             </div>
           ))}
+
+          {orphanManual.length > 0 && (
+            <div className="rounded-xl border border-orange-200 overflow-hidden bg-orange-50/30">
+              <div className="flex items-center justify-between gap-3 px-4 py-3 bg-orange-50 border-b border-orange-100">
+                <div>
+                  <p className="text-sm font-bold text-orange-900">Linked to removed dish — review</p>
+                  <p className="text-[11px] text-orange-800 mt-0.5">These manual lines reference a dish no longer on the menu.</p>
+                </div>
+              </div>
+              <div className="overflow-hidden">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-orange-100 bg-white/80">
+                      <th className="text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide py-2 pl-4 pr-3">Item Name</th>
+                      <th className="text-right text-[11px] font-semibold text-slate-500 uppercase tracking-wide py-2 px-3">Quantity</th>
+                      <th className="text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide py-2 px-3">Unit</th>
+                      <th className="text-right text-[11px] font-semibold text-slate-500 uppercase tracking-wide py-2 px-3">Rate</th>
+                      <th className="text-right text-[11px] font-semibold text-slate-500 uppercase tracking-wide py-2 px-3">Total</th>
+                      <th className="py-2 pl-2 pr-3" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {renderCostingTableRows(orphanManual, '—')}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {quoteLevelManual.length > 0 && (
+            <div className="rounded-xl border border-white/8 overflow-hidden">
+              <div className="flex items-center justify-between gap-3 px-4 py-3 bg-slate-50 border-b border-white/8">
+                <div>
+                  <p className="text-sm font-bold text-black">{QUOTE_LEVEL_LABEL}</p>
+                  <p className="text-[11px] text-slate-600 mt-0.5">Rentals, labour, transport, and other non-recipe costs</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditId(null);
+                    setForm({ ...DISH_COST_BLANK_FORM, dishId: QUOTE_LEVEL_FORM_VALUE });
+                    setShowForm(true);
+                  }}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-yellow-500/15 text-yellow-600 border border-yellow-500/20 hover:bg-yellow-500/25 transition-colors"
+                >
+                  <Plus size={11} /> Add Item
+                </button>
+              </div>
+              <div className="overflow-hidden">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-white/8 bg-white/3">
+                      <th className="text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide py-2 pl-4 pr-3">Item Name</th>
+                      <th className="text-right text-[11px] font-semibold text-slate-500 uppercase tracking-wide py-2 px-3">Quantity</th>
+                      <th className="text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide py-2 px-3">Unit</th>
+                      <th className="text-right text-[11px] font-semibold text-slate-500 uppercase tracking-wide py-2 px-3">Rate</th>
+                      <th className="text-right text-[11px] font-semibold text-slate-500 uppercase tracking-wide py-2 px-3">Total</th>
+                      <th className="py-2 pl-2 pr-3" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {renderCostingTableRows(quoteLevelManual, 'Add quote-level items with the form above.')}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
       {items.length > 0 && <div className="pb-1" />}
 
       {items.length > 0 && (
-        <div className="border-t border-white/10 bg-black px-5 py-3.5 flex items-center justify-between">
+        <div className="border-t border-white/10 bg-black px-5 py-3.5 flex items-center justify-between gap-4 flex-wrap">
           <div>
             <span className="text-lg font-semibold text-white">Total Internal Cost</span>
             <span className="ml-2 text-[11px] text-slate-400 tabular-nums">({items.length} item{items.length > 1 ? 's' : ''})</span>
+            <p className="text-[10px] text-slate-500 mt-1 tabular-nums">
+              From menu (recipe) {fmtINR(totalRecipe)} · Manual {fmtINR(totalManual)} · Total {fmtINR(grandTotal)}
+            </p>
           </div>
           <span className="text-4xl font-bold text-white tabular-nums">{fmtINR(grandTotal)}</span>
         </div>
@@ -1847,7 +1917,6 @@ interface PricingTabProps {
   initialSellingPrice: number;
   initialInternalCost: number;
   initialAdvanceAmount: number;
-  initialPaymentTerms: string;
   menuTotal: number;
   internalCost: number;
   hasCostItems: boolean;
@@ -1857,7 +1926,9 @@ interface PricingTabProps {
     final_selling_price: number;
     internal_cost: number;
     advance_amount: number;
-    payment_terms: string;
+    costing_data: ReturnType<typeof buildCostingSnapshot>;
+    grocery_data: unknown;
+    pricing_data: Record<string, number | string>;
   }) => Promise<void>;
 }
 
@@ -1875,7 +1946,6 @@ function PricingTab({
   initialSellingPrice,
   initialInternalCost,
   initialAdvanceAmount,
-  initialPaymentTerms,
   menuTotal,
   internalCost,
   hasCostItems,
@@ -1883,27 +1953,66 @@ function PricingTab({
   quoteId,
   onFinalise,
 }: PricingTabProps) {
-  const [sellingPrice, setSellingPrice] = useState<number>(initialSellingPrice || menuTotal);
-  const [advanceAmount, setAdvanceAmount] = useState<number>(initialAdvanceAmount || 0);
-  const [paymentTerms, setPaymentTerms] = useState(initialPaymentTerms);
+
+
+  const defaultSellingPrice =
+  initialSellingPrice > 0
+    ? initialSellingPrice
+    : internalCost > 0
+      ? Math.round(internalCost * 1.3)
+      : menuTotal;
+
+  const [sellingPrice, setSellingPrice] = useState<number>(defaultSellingPrice);
+
+  const [advanceAmount, setAdvanceAmount] = useState<number>(
+    initialAdvanceAmount || 0
+  );
+
   const [finalising, setFinalising] = useState(false);
 
-  // Auto-sync selling price when menuTotal changes, unless the user has manually overridden it
+  // Auto-sync selling price unless manually edited
   const [userEdited, setUserEdited] = useState(false);
-  useEffect(() => {
-    if (!userEdited && !isLocked && !initialSellingPrice) setSellingPrice(menuTotal);
-  }, [menuTotal, userEdited, isLocked, initialSellingPrice]);
 
   useEffect(() => {
-    setSellingPrice(initialSellingPrice || menuTotal);
+    if (!userEdited && !isLocked) {
+      setSellingPrice(
+        initialSellingPrice > 0
+          ? initialSellingPrice
+          : internalCost > 0
+            ? Math.round(internalCost * 1.3)
+            : menuTotal
+      );
+    }
+  }, [
+    initialSellingPrice,
+    internalCost,
+    menuTotal,
+    userEdited,
+    isLocked,
+  ]);
+
+  useEffect(() => {
+    setSellingPrice(
+      initialSellingPrice > 0
+        ? initialSellingPrice
+        : internalCost > 0
+          ? Math.round(internalCost * 1.3)
+          : menuTotal
+    );
+
     setAdvanceAmount(initialAdvanceAmount || 0);
-    setPaymentTerms(initialPaymentTerms || '');
+
     setUserEdited(false);
-  }, [initialSellingPrice, initialAdvanceAmount, initialPaymentTerms, menuTotal]);
+  }, [
+    initialSellingPrice,
+    initialAdvanceAmount,
+    internalCost,
+    menuTotal,
+  ]);
 
   const margin =
     sellingPrice > 0
-      ? Math.round((((sellingPrice - (initialInternalCost || internalCost)) / sellingPrice) * 100) * 100) / 100
+      ? Math.round((((sellingPrice - internalCost) / sellingPrice) * 100) * 100) / 100
       : 0;
 
   const perPlate = guestCount && guestCount > 0 ? Math.round(sellingPrice / guestCount) : null;
@@ -1917,7 +2026,19 @@ function PricingTab({
         final_selling_price: sellingPrice,
         internal_cost: internalCost,
         advance_amount: advanceAmount,
-        payment_terms: paymentTerms,
+        costing_data: buildCostingSnapshot([]),
+        grocery_data: {},
+        pricing_data: {
+          final_selling_price: sellingPrice,
+          selling_price: sellingPrice,
+          internal_cost: internalCost,
+          total_cost: internalCost,
+          advance_amount: advanceAmount,
+          credited_amount: advanceAmount,
+          balance_amount: Math.max(0, balance),
+          margin_percentage: margin,
+          menu_total: menuTotal,
+        },
       });
     } finally {
       setFinalising(false);
@@ -1930,8 +2051,8 @@ function PricingTab({
       {/* ── Header ── */}
       <div className="px-6 pt-7 pb-5 border-b border-slate-200">
         <div>
-          <h3 className="text-2xl font-semibold text-slate-900">Pricing</h3>
-          <p className="text-lg text-slate-600 mt-1">Set the final selling price to quote the client</p>
+          <h3 className="text-xl font-semibold text-slate-900">Pricing</h3>
+          <p className="text-md text-slate-600 mt-1">Set the final selling price to quote the client</p>
         </div>
       </div>
 
@@ -1960,7 +2081,7 @@ function PricingTab({
         <div className="flex flex-col gap-4">
           {/* Final selling price */}
           <div>
-            <label className="block text-xl font-medium text-slate-900 mb-2.5">
+            <label className="block text-lg font-medium text-slate-900 mb-2.5">
               Final Selling Price (₹)
             </label>
             <div className="relative ">
@@ -1968,8 +2089,7 @@ function PricingTab({
                 type="number"
                 min={0}
                 step={100}
-                value={sellingPrice || ''}
-                placeholder={String(menuTotal)}
+                value={sellingPrice}
                 disabled={isLocked}
                 onChange={e => {
                   setUserEdited(true);
@@ -1995,7 +2115,7 @@ function PricingTab({
 
           {/* Advance amount */}
           <div>
-            <label className="block text-xl font-medium text-slate-900 mb-2.5">
+            <label className="block text-lg font-medium text-slate-900 mb-2.5">
               Advance Amount (₹)
             </label>
             <div className="relative">
@@ -2021,23 +2141,6 @@ function PricingTab({
             </div>
           </div>
 
-          {/* Payment terms */}
-          <div>
-            <label className="block text-xl font-medium text-slate-900 mb-2.5">
-              Payment Terms
-            </label>
-            <input
-              type="text"
-              placeholder="e.g. 50% advance, balance on event day"
-              value={paymentTerms}
-              disabled={isLocked}
-              onChange={e => setPaymentTerms(e.target.value)}
-              className={
-                'w-full bg-white border border-slate-200 rounded-2xl px-5 py-3.5 text-lg font-medium text-slate-900 ' +
-                'placeholder:text-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all'
-              }
-            />
-          </div>
         </div>
 
         {/* ── Summary badges ── */}
@@ -2240,11 +2343,14 @@ function HistoryTab({ quoteId, revisions }: HistoryTabProps) {
                       Quotation — Rev. {revision.rev}
                     </span>
                   </div>
-                  {revision.isCurrent && (
-                    <span className="text-[12px] font-bold px-2.5 py-0.5 rounded-full bg-violet-600 text-white uppercase tracking-wide">
-                      Current
-                    </span>
-                  )}
+                  <span className={[
+                    'text-[12px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wide',
+                    revision.isCurrent
+                      ? 'bg-violet-600 text-white'
+                      : 'bg-slate-200 text-slate-600',
+                  ].join(' ')}>
+                    {revision.isCurrent ? 'Current' : 'Locked'}
+                  </span>
                 </div>
                 <div className="px-4 py-3">
                   <div className="relative ml-2 pl-4 border-l-2 border-slate-200">
@@ -2329,6 +2435,9 @@ interface ApiQuotation {
   version_number?: number;
   status?: string;
   is_locked?: boolean;
+  /** UUID for public /q/{token} link */
+  public_token?: string;
+  accepted_at?: string | null;
   final_selling_price?: number | string | null;
   internal_cost?: number | string | null;
   margin?: number | string | null;
@@ -2336,6 +2445,24 @@ interface ApiQuotation {
   payment_terms?: string;
   menu_dishes?: Dish[];
   menu_services?: Service[];
+  costing_data?: unknown;
+  grocery_data?: unknown;
+  pricing_data?: unknown;
+}
+
+function buildCostingSnapshot(items: DishCostItem[]) {
+  return {
+    items: items.map(item => ({
+      ...item,
+      dish_id: item.dishId,
+      quantity: item.qty,
+      unit_rate: item.rate,
+      total: item.qty * item.rate,
+      amount: item.qty * item.rate,
+      ingredient_name: item.name,
+      dish_name: item.dishName,
+    })),
+  };
 }
 
 export default function QuotationCard({
@@ -2343,8 +2470,10 @@ export default function QuotationCard({
 }: QuotationCardProps) {
   const [activeTab, setActiveTab] = useState<QuotationTab>('menu');
   const queryClient = useQueryClient();
-  const [menuSaveError, setMenuSaveError] = useState(false);
+  const [menuSaveError, setMenuSaveError] = useState<string | null>(null);
   const [costItems, setCostItems] = useState<DishCostItem[]>([]);
+  const hydratedQuotationRef = useRef<string | null>(null);
+  const recipeSyncGen = useRef(0);
   const costItemsStorageKey = `quotation-cost-items:${leadId}`;
   const { data: quotationVersions = [] } = useQuery<ApiQuotation[]>({
     queryKey: ['quotation-menu', leadId],
@@ -2353,48 +2482,139 @@ export default function QuotationCard({
       const quotes: ApiQuotation[] = Array.isArray(raw) ? raw : (raw?.results ?? []);
       return quotes;
     },
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
   });
   const quotationData = quotationVersions[0] ?? null;
   const quotationId = quotationData?.id ?? null;
-  const dishes = Array.isArray(quotationData?.menu_dishes) ? quotationData.menu_dishes : [];
-  const services = Array.isArray(quotationData?.menu_services) ? quotationData.menu_services : [];
+  const menuDishesRaw = quotationData?.menu_dishes;
+  const menuServicesRaw = quotationData?.menu_services;
+  const dishes = useMemo(
+    () => Array.isArray(menuDishesRaw) ? (menuDishesRaw as unknown[]).map(normalizeDish) : [],
+    [menuDishesRaw],
+  );
+  const services = useMemo(
+    () => Array.isArray(menuServicesRaw) ? (menuServicesRaw as Service[]) : [],
+    [menuServicesRaw],
+  );
   const isLocked = Boolean(quotationData?.is_locked);
   const currentRevision = Number(quotationData?.version_number ?? 1);
 
-  useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(costItemsStorageKey);
-      if (!raw) return;
-      const parsed = JSON.parse(raw);
-      if (!Array.isArray(parsed)) return;
-      const hydrated = parsed.filter((item): item is DishCostItem => (
-        item &&
-        typeof item === 'object' &&
-        typeof item.id === 'string' &&
-        typeof item.dishId === 'string' &&
-        typeof item.dishName === 'string' &&
-        (item.source === 'recipe' || item.source === 'manual') &&
-        typeof item.name === 'string'
-      )).map(item => ({
-        ...item,
-        qty: Number(item.qty) || 0,
-        rate: Number(item.rate) || 0,
-        unit: item.unit || 'unit',
-        category: item.category || 'Other',
-      }));
-      if (hydrated.length > 0) setCostItems(hydrated);
-    } catch {
-      // Ignore malformed local cache and continue with fresh state.
+  const dishesMenuSignature = useMemo(
+    () => JSON.stringify(
+      (dishes ?? []).map(d => ({
+        id: d.id,
+        qty: d.qty,
+        unit: d.unit,
+        batch_size: d.batch_size,
+        base_recipe_qty: d.base_recipe_qty,
+      })),
+    ),
+    [dishes],
+  );
+
+  const manualReviewWarning = useMemo(() => {
+    const manual = costItems.filter(i => i.source === 'manual');
+    if (dishes.length === 0 && manual.length > 0) {
+      return 'Manual items still exist. Please review costing.';
     }
-  }, [costItemsStorageKey]);
+    const dishIds = new Set(dishes.map(d => d.id));
+    if (manual.some(i => i.dishId != null && i.dishId !== '' && !dishIds.has(i.dishId))) {
+      return 'Manual items still exist. Please review costing.';
+    }
+    return null;
+  }, [dishes, costItems]);
+
+  /** Load manual-only rows from server or local cache; recipe rows are filled by menu sync below. */
+  useLayoutEffect(() => {
+    if (!quotationData?.id || hydratedQuotationRef.current === quotationData.id) return;
+
+    let manualFromApi = manualRowsFromSnapshot(quotationData.costing_data);
+    if (manualFromApi.length === 0) {
+      try {
+        const raw = window.localStorage.getItem(costItemsStorageKey);
+        if (raw) {
+          const parsed = JSON.parse(raw) as unknown;
+          if (Array.isArray(parsed)) {
+            manualFromApi = parseCostingRows(parsed).filter(i => i.source === 'manual');
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+
+    // Bootstrap manual rows from snapshot before async recipe sync runs (see next effect).
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional one-time hydration per quotation id
+    setCostItems(manualFromApi);
+    hydratedQuotationRef.current = quotationData.id;
+  }, [costItemsStorageKey, quotationData?.costing_data, quotationData?.id]);
+
+  /** Menu drives recipe lines; manual lines are preserved. */
+  useEffect(() => {
+    if (!quotationId || isLocked || hydratedQuotationRef.current !== quotationId) return;
+
+    const gen = ++recipeSyncGen.current;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        if (!dishes.length) {
+          if (cancelled || gen !== recipeSyncGen.current) return;
+          setCostItems(prev => prev.filter(i => i.source === 'manual'));
+          return;
+        }
+        const blocks = await Promise.all(
+          dishes.map(async d => {
+            const recipe = await api.get(`/master/dishes/${d.id}/recipe/`) as ApiRecipeResponse;
+            return recipeCostRowsFromApi(d, recipe);
+          }),
+        );
+        if (cancelled || gen !== recipeSyncGen.current) return;
+        setCostItems(prev => [...blocks.flat(), ...prev.filter(i => i.source === 'manual')]);
+      } catch {
+        if (cancelled || gen !== recipeSyncGen.current) return;
+        setCostItems(prev => {
+          const manual = prev.filter(i => i.source === 'manual');
+          const ids = new Set(dishes.map(d => d.id));
+          const recipeKept = prev.filter(
+            i => i.source === 'recipe' && i.dishId != null && ids.has(i.dishId),
+          );
+          return [...recipeKept, ...manual];
+        });
+      }
+    })();
+
+    return () => { cancelled = true; };
+    // dishesMenuSignature tracks all menu fields that affect recipe quantities
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dishesMenuSignature, isLocked, quotationId]);
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem(costItemsStorageKey, JSON.stringify(costItems));
-    } catch {
-      // Ignore write failures (e.g. privacy mode).
-    }
-  }, [costItems, costItemsStorageKey]);
+    if (!quotationId || isLocked || hydratedQuotationRef.current !== quotationId) return;
+    const timeout = window.setTimeout(() => {
+      const total = costItems.reduce((s, i) => s + i.qty * i.rate, 0);
+      void api.patch(`/quotations/${quotationId}/`, {
+        costing_data: buildCostingSnapshot(costItems),
+        internal_cost: total.toFixed(2),
+      }).then(() => {
+        // Only costing fields changed — update them in the cache without
+        // triggering a full menu refetch that would create new dish/service
+        // array references and cause unnecessary MenuTab re-renders.
+        queryClient.setQueryData<ApiQuotation[]>(['quotation-menu', leadId], (old) => {
+          if (!old?.length) return old;
+          return [{ ...old[0], internal_cost: total.toFixed(2) }];
+        });
+        void queryClient.invalidateQueries({ queryKey: ['lead-quotation-summary', leadId] });
+      });
+      try {
+        window.localStorage.setItem(costItemsStorageKey, JSON.stringify(costItems));
+      } catch {
+        /* ignore */
+      }
+    }, 600);
+    return () => window.clearTimeout(timeout);
+  }, [costItems, isLocked, quotationId, leadId, queryClient, costItemsStorageKey]);
 
   async function refetchMenu() {
     await queryClient.invalidateQueries({ queryKey: ['quotation-menu', leadId] });
@@ -2410,73 +2630,122 @@ export default function QuotationCard({
     return String(created.id);
   }
 
+  /** Read current menu state directly from the React Query cache — no extra network request. */
+  function getMenuFromCache(): { menu_dishes: Dish[]; menu_services: Service[] } {
+    const cached = queryClient.getQueryData<ApiQuotation[]>(['quotation-menu', leadId]);
+    return {
+      menu_dishes: Array.isArray(cached?.[0]?.menu_dishes)
+        ? (cached![0].menu_dishes as unknown[]).map(normalizeDish)
+        : [],
+      menu_services: Array.isArray(cached?.[0]?.menu_services)
+        ? (cached![0].menu_services as Service[])
+        : [],
+    };
+  }
+
+  /** Push new menu state into the cache — avoids a refetch race where stale data wipes local adds. */
+  function updateMenuCache(menu_dishes: Dish[], menu_services: Service[]) {
+    queryClient.setQueryData<ApiQuotation[]>(['quotation-menu', leadId], (old) => {
+      if (!old?.length) return old;
+      return [{ ...old[0], menu_dishes, menu_services }];
+    });
+    void queryClient.invalidateQueries({ queryKey: ['lead-quotation-summary', leadId] });
+  }
+
   const addItemMutation = useMutation({
     mutationFn: async ({ itemType, item }: { itemType: 'dish' | 'service'; item: Dish | Service }) => {
+      const prevQid = quotationId;
       const qid = await ensureQuotationId();
-      await api.post('/quotations/quotation-items/', {
-        quotation: qid,
-        item_type: itemType,
-        item,
-      });
+      const { menu_dishes, menu_services } = getMenuFromCache();
+      const newDishes = itemType === 'dish' ? [...menu_dishes, item as Dish] : menu_dishes;
+      const newSvcs = itemType === 'service' ? [...menu_services, item as Service] : menu_services;
+      await api.patch(`/quotations/${qid}/`, { menu_dishes: newDishes, menu_services: newSvcs });
+      return { prevQid, qid, menu_dishes: newDishes, menu_services: newSvcs };
     },
-    onSuccess: () => {
-      setMenuSaveError(false);
-      void refetchMenu();
+    onSuccess: ({ prevQid, qid, menu_dishes, menu_services }) => {
+      setMenuSaveError(null);
+      if (!prevQid) {
+        // Quotation was just created. Seed the cache with our local dish values so
+        // that when quotationId changes (null → qid) MenuTab's sync effect reads
+        // correct data instead of whatever the server round-tripped.
+        queryClient.setQueryData<ApiQuotation[]>(['quotation-menu', leadId], (old) => {
+          const base: ApiQuotation = old?.[0] ?? ({ id: qid, inquiry: leadId } as ApiQuotation);
+          return [{ ...base, id: qid, menu_dishes, menu_services }];
+        });
+        void queryClient.invalidateQueries({ queryKey: ['lead-quotation-summary', leadId] });
+        // Background refetch to populate public_token, version_number, etc.
+        // MenuTab's sync effect won't fire again because quotationId won't change.
+        void queryClient.invalidateQueries({ queryKey: ['quotation-menu', leadId] });
+      } else {
+        updateMenuCache(menu_dishes, menu_services);
+      }
     },
-    onError: () => setMenuSaveError(true),
+    onError: (err) => setMenuSaveError(formatMenuMutationError(err)),
   });
 
   const updateItemMutation = useMutation({
     mutationFn: async ({ itemType, item }: { itemType: 'dish' | 'service'; item: Dish | Service }) => {
       const qid = await ensureQuotationId();
-      await api.patch(`/quotations/quotation-items/${item.id}/`, {
-        quotation: qid,
-        item_type: itemType,
-        item,
-      });
+      const { menu_dishes, menu_services } = getMenuFromCache();
+      const newDishes = itemType === 'dish'
+        ? menu_dishes.map(d => String(d.id) === String((item as Dish).id) ? item as Dish : d)
+        : menu_dishes;
+      const newSvcs = itemType === 'service'
+        ? menu_services.map(s => String(s.id) === String((item as Service).id) ? item as Service : s)
+        : menu_services;
+      await api.patch(`/quotations/${qid}/`, { menu_dishes: newDishes, menu_services: newSvcs });
+      return { menu_dishes: newDishes, menu_services: newSvcs };
     },
-    onSuccess: () => {
-      setMenuSaveError(false);
-      void refetchMenu();
+    onSuccess: ({ menu_dishes, menu_services }) => {
+      setMenuSaveError(null);
+      updateMenuCache(menu_dishes, menu_services);
     },
-    onError: () => setMenuSaveError(true),
+    onError: (err) => setMenuSaveError(formatMenuMutationError(err)),
   });
 
   const deleteItemMutation = useMutation({
     mutationFn: async ({ itemType, itemId }: { itemType: 'dish' | 'service'; itemId: string }) => {
       const qid = await ensureQuotationId();
-      await api.delete(`/quotations/quotation-items/${itemId}/?quotation=${qid}&item_type=${itemType}`);
+      const { menu_dishes, menu_services } = getMenuFromCache();
+      const newDishes = itemType === 'dish'
+        ? menu_dishes.filter(d => String(d.id) !== String(itemId))
+        : menu_dishes;
+      const newSvcs = itemType === 'service'
+        ? menu_services.filter(s => String(s.id) !== String(itemId))
+        : menu_services;
+      await api.patch(`/quotations/${qid}/`, { menu_dishes: newDishes, menu_services: newSvcs });
+      return { menu_dishes: newDishes, menu_services: newSvcs };
     },
-    onSuccess: () => {
-      setMenuSaveError(false);
-      void refetchMenu();
+    onSuccess: ({ menu_dishes, menu_services }) => {
+      setMenuSaveError(null);
+      updateMenuCache(menu_dishes, menu_services);
     },
-    onError: () => setMenuSaveError(true),
+    onError: (err) => setMenuSaveError(formatMenuMutationError(err)),
   });
 
-  function onAddDish(dish: Dish) {
+  const onAddDish = useCallback((dish: Dish) => {
     addItemMutation.mutate({ itemType: 'dish', item: dish });
-  }
+  }, [addItemMutation]);
 
-  function onUpdateDish(dish: Dish) {
+  const onUpdateDish = useCallback((dish: Dish) => {
     updateItemMutation.mutate({ itemType: 'dish', item: dish });
-  }
+  }, [updateItemMutation]);
 
-  function onRemoveDish(id: string) {
+  const onRemoveDish = useCallback((id: string) => {
     deleteItemMutation.mutate({ itemType: 'dish', itemId: id });
-  }
+  }, [deleteItemMutation]);
 
-  function onAddService(service: Service) {
+  const onAddService = useCallback((service: Service) => {
     addItemMutation.mutate({ itemType: 'service', item: service });
-  }
+  }, [addItemMutation]);
 
-  function onUpdateService(service: Service) {
+  const onUpdateService = useCallback((service: Service) => {
     updateItemMutation.mutate({ itemType: 'service', item: service });
-  }
+  }, [updateItemMutation]);
 
-  function onRemoveService(id: string) {
+  const onRemoveService = useCallback((id: string) => {
     deleteItemMutation.mutate({ itemType: 'service', itemId: id });
-  }
+  }, [deleteItemMutation]);
 
   // Derived totals consumed by multiple tabs
   const menuTotal = dishes.reduce((s, d) => s + d.subtotal, 0)
@@ -2503,15 +2772,88 @@ export default function QuotationCard({
       }))
     : MOCK_REVISIONS;
 
+  const quotationStatusUpper = String(quotationData?.status ?? 'DRAFT').toUpperCase();
+  const acceptedAtRaw = quotationData?.accepted_at;
+
+  async function handleDownloadQuotationPdf() {
+    if (!quotationId) {
+      toast.error('No quotation to download');
+      return;
+    }
+    try {
+      const safeName = (clientName || 'client').replace(/[\\/:*?"<>|]/g, '').trim() || 'client';
+      await api.download(`/quotations/${quotationId}/export-pdf/`, `${quoteId} — ${safeName}.pdf`);
+    } catch {
+      toast.error('Failed to download quotation');
+    }
+  }
+
+  async function handleShareWithClient() {
+    const token = quotationData?.public_token;
+    if (!quotationId) {
+      toast.error('No quotation to share');
+      return;
+    }
+    if (!token) {
+      toast.error('Share link not available');
+      return;
+    }
+    const url = `${window.location.origin}/q/${token}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success('Link copied!', { duration: 2000 });
+    } catch {
+      toast.error('Could not copy link');
+    }
+  }
+
+  let acceptedAtDisplay: string | null = null;
+  if (acceptedAtRaw) {
+    try {
+      const d = new Date(acceptedAtRaw);
+      acceptedAtDisplay = d.toLocaleString('en-IN', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+      });
+    } catch {
+      acceptedAtDisplay = String(acceptedAtRaw);
+    }
+  }
+
   // Called by PricingTab when "Finalise & Send Quotation" is clicked
   async function handleFinalise(payload: {
     final_selling_price: number;
     internal_cost: number;
     advance_amount: number;
-    payment_terms: string;
+    costing_data: ReturnType<typeof buildCostingSnapshot>;
+    grocery_data: unknown;
+    pricing_data: Record<string, number | string>;
   }) {
     const qid = await ensureQuotationId();
-    await api.post(`/quotations/${qid}/finalize/`, payload);
+    let groceryData = quotationData?.grocery_data ?? {};
+    try {
+      groceryData = await api.get(`/quotations/${qid}/grocery-sheet/`);
+    } catch {
+      groceryData = quotationData?.grocery_data ?? {};
+    }
+    const costingData = buildCostingSnapshot(costItems);
+    const body = {
+      ...payload,
+      costing_data: costingData,
+      grocery_data: groceryData,
+      pricing_data: {
+        ...payload.pricing_data,
+        total_cost: payload.internal_cost,
+        cost: payload.internal_cost,
+      },
+    };
+
+    await api.post(`/quotations/${qid}/finalize/`, body);
+
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['quotation-menu', leadId] }),
       queryClient.invalidateQueries({ queryKey: ['lead-quotation-summary', leadId] }),
@@ -2521,6 +2863,45 @@ export default function QuotationCard({
 
   return (
     <div className="rounded-2xl border border-black/10 bg-white overflow-hidden">
+
+      {/* Share / download + client response status */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between px-4 py-3 border-b border-slate-200 bg-slate-50/90">
+        <div className="flex flex-wrap items-center gap-2 min-h-[32px]">
+          {quotationStatusUpper === 'ACCEPTED' ? (
+            <span className="inline-flex flex-wrap items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold bg-emerald-100 text-emerald-900 border border-emerald-200">
+              <span>Client accepted</span>
+              {acceptedAtDisplay ? (
+                <span className="font-normal text-emerald-800 opacity-90">· {acceptedAtDisplay}</span>
+              ) : null}
+            </span>
+          ) : null}
+          {quotationStatusUpper === 'SENT' ? (
+            <span className="inline-flex items-center rounded-full px-3 py-1.5 text-xs font-semibold bg-amber-100 text-amber-950 border border-amber-200">
+              Awaiting response
+            </span>
+          ) : null}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void handleDownloadQuotationPdf()}
+            disabled={!quotationId}
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-sm font-semibold text-slate-800 shadow-sm hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Download size={16} aria-hidden />
+            Download PDF
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleShareWithClient()}
+            disabled={!quotationId || !quotationData?.public_token}
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-600 px-3.5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Link2 size={16} aria-hidden />
+            Share with client
+          </button>
+        </div>
+      </div>
 
       {/* Tab Bar */}
       <div className="flex border-b border-white/10 overflow-x-auto">
@@ -2541,12 +2922,17 @@ export default function QuotationCard({
       </div>
 
       {/* Tab Content */}
-      {activeTab === 'menu' && (
+      {/* MenuTab is always mounted so local form state (addedDishes, open panels,
+          scroll position) survives tab switches. CSS `hidden` keeps it out of
+          layout without unmounting it. */}
+      <div className={activeTab !== 'menu' ? 'hidden' : undefined}>
         <MenuTab
+          quotationId={quotationId}
           dishes={dishes}
           services={services}
           isSaving={addItemMutation.isPending || updateItemMutation.isPending || deleteItemMutation.isPending}
           saveError={menuSaveError}
+          guestCount={guestCount}
           onAddDish={onAddDish}
           onUpdateDish={onUpdateDish}
           onRemoveDish={onRemoveDish}
@@ -2554,9 +2940,14 @@ export default function QuotationCard({
           onUpdateService={onUpdateService}
           onRemoveService={onRemoveService}
         />
-      )}
+      </div>
       {activeTab === 'costing' && (
-        <CostingTabByDish dishes={dishes} items={costItems} setItems={setCostItems} />
+        <CostingTabByDish
+          dishes={dishes}
+          items={costItems}
+          setItems={setCostItems}
+          manualReviewWarning={manualReviewWarning}
+        />
       )}
       {activeTab === 'validation' && (
         <ValidationTab
@@ -2576,7 +2967,6 @@ export default function QuotationCard({
           initialSellingPrice={Number(quotationData?.final_selling_price ?? 0)}
           initialInternalCost={Number(quotationData?.internal_cost ?? 0)}
           initialAdvanceAmount={Number(quotationData?.advance_amount ?? 0)}
-          initialPaymentTerms={quotationData?.payment_terms ?? ''}
           menuTotal={menuTotal}
           internalCost={internalCost}
           hasCostItems={costItems.length > 0}
