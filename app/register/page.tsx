@@ -110,19 +110,21 @@ export default function RegisterPage() {
     <div className="flex min-h-screen">
       {/* Left — brand panel */}
       <div className="hidden lg:flex flex-col justify-between w-1/2 p-12 relative overflow-hidden"
-        style={{ backgroundColor: '#1C3355' }}>
+        style={{ backgroundColor: 'black' }}>
         <div className="absolute -top-24 -right-24 rounded-full opacity-10"
           style={{ width: 400, height: 400, backgroundColor: '#D95F0E' }} />
         <div className="absolute -bottom-32 -left-32 rounded-full opacity-10"
           style={{ width: 500, height: 500, backgroundColor: '#0D9488' }} />
 
         {/* Logo */}
-        <div className="relative z-10 flex items-center gap-3">
-          <div className="flex items-center justify-center rounded-xl"
-            style={{ width: 44, height: 44, backgroundColor: '#D95F0E' }}>
-            <ChefHat size={24} color="#fff" />
+        <div className="relative z-10 flex items-start justify-start">
+          <div className="relative w-[320px] h-[90px]">
+            <img
+              src="/logos/white-logo.png"
+              alt="CateringOS"
+              className="h-full w-full object-contain object-left"
+            />
           </div>
-          <span className="text-white font-bold text-lg">CateringOS</span>
         </div>
 
         {/* Center copy */}
@@ -136,7 +138,7 @@ export default function RegisterPage() {
           <div className="mt-8 flex flex-col gap-3">
             {['Full event lifecycle management', 'Smart grocery generation', 'Instant PDF quotations'].map(f => (
               <div key={f} className="flex items-center gap-2">
-                <div className="rounded-full" style={{ width: 6, height: 6, backgroundColor: '#D95F0E' }} />
+                <div className="rounded-full" style={{ width: 6, height: 6, backgroundColor: 'black' }} />
                 <span className="text-sm" style={{ color: 'rgba(255,255,255,0.7)' }}>{f}</span>
               </div>
             ))}
@@ -153,11 +155,13 @@ export default function RegisterPage() {
         <div className="w-full" style={{ maxWidth: 400 }}>
           {/* Mobile logo */}
           <div className="flex lg:hidden items-center gap-2 mb-8">
-            <div className="flex items-center justify-center rounded-lg"
-              style={{ width: 36, height: 36, backgroundColor: '#1C3355' }}>
-              <ChefHat size={18} color="#fff" />
-            </div>
-            <span className="font-bold text-base" style={{ color: '#1C3355' }}>CateringOS</span>
+          <div className="relative w-[520px] h-[120px]">
+            <img
+              src="/logos/white-logo.png"
+              alt="CateringOS"
+              className="h-full w-full object-contain object-left"
+            />
+          </div>
           </div>
 
           {success ? (
@@ -193,10 +197,10 @@ export default function RegisterPage() {
                     required
                     value={form.company_name}
                     onChange={e => set('company_name', e.target.value)}
-                    placeholder="Afsal Catering Services"
+                    placeholder="Company Name"
                     className={inputCls}
                     style={inputStyle}
-                    onFocus={e => (e.currentTarget.style.borderColor = '#D95F0E')}
+                    onFocus={e => (e.currentTarget.style.borderColor = 'black')}
                     onBlur={e =>  (e.currentTarget.style.borderColor = '#E2E8F0')}
                   />
                 </div>
@@ -210,10 +214,10 @@ export default function RegisterPage() {
                     autoComplete="email"
                     value={form.email}
                     onChange={e => set('email', e.target.value)}
-                    placeholder="owner@company.com"
+                    placeholder="Email Address"
                     className={inputCls}
                     style={inputStyle}
-                    onFocus={e => (e.currentTarget.style.borderColor = '#D95F0E')}
+                    onFocus={e => (e.currentTarget.style.borderColor = 'black')}
                     onBlur={e =>  (e.currentTarget.style.borderColor = '#E2E8F0')}
                   />
                 </div>
@@ -230,7 +234,7 @@ export default function RegisterPage() {
                       placeholder="Min. 8 characters"
                       className={`${inputCls} pr-10`}
                       style={inputStyle}
-                      onFocus={e => (e.currentTarget.style.borderColor = '#D95F0E')}
+                      onFocus={e => (e.currentTarget.style.borderColor = 'black')}
                       onBlur={e =>  (e.currentTarget.style.borderColor = '#E2E8F0')}
                     />
                     <button
@@ -256,7 +260,7 @@ export default function RegisterPage() {
                       placeholder="Re-enter your password"
                       className={`${inputCls} pr-10`}
                       style={inputStyle}
-                      onFocus={e => (e.currentTarget.style.borderColor = '#D95F0E')}
+                      onFocus={e => (e.currentTarget.style.borderColor = 'black')}
                       onBlur={e =>  (e.currentTarget.style.borderColor = '#E2E8F0')}
                     />
                     <button
@@ -279,7 +283,7 @@ export default function RegisterPage() {
                     onChange={e => set('country', e.target.value)}
                     className={inputCls}
                     style={{ ...inputStyle, appearance: 'auto' }}
-                    onFocus={e => (e.currentTarget.style.borderColor = '#D95F0E')}
+                    onFocus={e => (e.currentTarget.style.borderColor = 'black')}
                     onBlur={e =>  (e.currentTarget.style.borderColor = '#E2E8F0')}
                   >
                     {COUNTRIES.map(c => (
@@ -301,7 +305,7 @@ export default function RegisterPage() {
                   type="submit"
                   disabled={loading}
                   className="flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold text-white transition-opacity mt-1"
-                  style={{ backgroundColor: '#D95F0E', opacity: loading ? 0.7 : 1 }}
+                  style={{ backgroundColor: 'black', opacity: loading ? 0.7 : 1 }}
                 >
                   {loading && <Loader2 size={15} className="animate-spin" />}
                   {loading ? 'Creating account…' : 'Create Account'}
@@ -311,7 +315,7 @@ export default function RegisterPage() {
               {/* Sign in link */}
               <p className="text-sm text-center mt-6" style={{ color: '#64748B' }}>
                 Already have an account?{' '}
-                <a href="/login" className="font-semibold hover:underline" style={{ color: '#D95F0E' }}>
+                <a href="/login" className="font-semibold hover:underline" style={{ color: 'black' }}>
                   Sign in
                 </a>
               </p>

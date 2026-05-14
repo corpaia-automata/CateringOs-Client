@@ -18,7 +18,7 @@ export default function RootPage() {
       <LandingModules />
       <LandingDashboard />
       <LandingWorkflow />
-      <LandingTestimonials />
+      {/* <LandingTestimonials /> */}
       <LandingPricing />
       <LandingCTA />
       <LandingFooter />

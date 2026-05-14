@@ -28,7 +28,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <link rel="icon" href={FAVICON} type="image/png" sizes="any" />
         <link rel="shortcut icon" href={FAVICON} type="image/png" />
@@ -37,7 +37,7 @@ export default function RootLayout({
       <body className={`${inter.variable} font-sans antialiased bg-background`}>
         <Providers>
           <SubscriptionProvider>
-            {/* <TrialBanner /> */}
+            <TrialBanner />
             {children}
             <ExpiredOverlay />
             <Toaster position="top-right" />
