@@ -133,7 +133,7 @@ function LoginPageContent() {
 
         {/* Logo */}
         <div className="relative z-10 flex items-start justify-start">
-          <div className="relative w-[520px] h-[120px]">
+          <div className="relative w-[320px] h-[90px]">
             <img
               src="/logos/white-logo.png"
               alt="CateringOS"
