@@ -10,7 +10,9 @@ import CreateDishForm, { DishApiResponse } from '../../../CreateDishForm';
 
 export default function EditDishPage() {
   const router = useRouter();
-  const { slug, id } = useParams<{ slug: string; id: string }>();
+  const params = useParams<{ slug: string; id: string }>();
+  const slug = params?.slug ?? '';
+  const id = params?.id ?? '';
   const listPath = `/app/${slug}/master`;
 
   const { data: dish, isLoading, isError } = useQuery<DishApiResponse>({

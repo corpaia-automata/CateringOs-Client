@@ -491,7 +491,8 @@ function DeleteModal({ name, onConfirm, onCancel, loading }: {
 // ─── Main Page ──────────────────────────────────────────────────────────────────
 
 export default function LeadDetailPage() {
-  const { id } = useParams<{ id: string }>();
+  const params = useParams<{ id: string }>();
+  const id = params?.id ?? '';
   const router = useRouter();
   const qc = useQueryClient();
 
@@ -879,8 +880,8 @@ export default function LeadDetailPage() {
 
         {/* ── Stats Bar ── */}
         <div className="px-6 -mt-px">
-          <div className="bg-white rounded-b-2xl shadow-sm grid grid-cols-2 sm:grid-cols-4 divide-x"
-            style={{ borderLeft: '1px solid #E2E8F0', borderRight: '1px solid #E2E8F0', borderBottom: '1px solid #E2E8F0', divideColor: '#F1F5F9' }}>
+          <div className="bg-white rounded-b-2xl shadow-sm grid grid-cols-2 sm:grid-cols-4 divide-x divide-[#F1F5F9]"
+            style={{ borderLeft: '1px solid #E2E8F0', borderRight: '1px solid #E2E8F0', borderBottom: '1px solid #E2E8F0' }}>
             {[
               { icon: CalendarDays, label: 'Event Date', value: fmtDate(lead.converted_event?.event_date ?? lead.tentative_date), color: '#3B82F6' },
               { icon: Users, label: 'Guests', value: lead.guest_count ? `${lead.guest_count} Pax` : '—', color: '#7C3AED' },

@@ -74,7 +74,8 @@ function serverToDraft(pe: PreEstimate): DraftCategory[] {
 // ─── Page ────────────────────────────────────────────────────────────────────
 
 export default function PreEstimatePage() {
-  const { id: inquiryId } = useParams<{ id: string }>();
+  const params = useParams<{ id: string }>();
+  const inquiryId = params?.id ?? '';
   const router = useRouter();
   const queryClient = useQueryClient();
 

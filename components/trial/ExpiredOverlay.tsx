@@ -10,7 +10,7 @@ export default function ExpiredOverlay() {
   const pathname = usePathname();
   const isExpired = useIsExpired();
   const isLoggedIn = authStorage.isLoggedIn();
-  const isAuthPage = AUTH_PATHS.some((path) => pathname.startsWith(path));
+  const isAuthPage = AUTH_PATHS.some((path) => pathname?.startsWith(path));
 
   if (!isLoggedIn || isAuthPage || !isExpired) return null;
 

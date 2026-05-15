@@ -150,9 +150,9 @@ type KpiCardProps = {
   iconBg: string;
   iconColor: string;
   href: string;
-  subtitle: string;
-  subtitleIcon: React.ReactNode;
-  subtitleColor: string;
+  subtitle?: string;
+  subtitleIcon?: React.ReactNode;
+  subtitleColor?: string;
   loading?: boolean;
 };
 
@@ -213,14 +213,30 @@ function KpiCard({
       )}
 
       {/* Subtitle */}
-      <div className="flex items-center gap-1.5">
-        <span style={{ color: subtitleColor, display: 'flex', alignItems: 'center' }}>
-          {subtitleIcon}
-        </span>
-        <span style={{ fontSize: 12, color: subtitleColor, fontWeight: 500 }}>
-          {subtitle}
-        </span>
-      </div>
+      {subtitle && (
+        <div className="flex items-center gap-1.5">
+          {subtitleIcon && (
+            <span
+              style={{
+                color: subtitleColor,
+                display: 'flex',
+                alignItems: 'center',
+              }}
+            >
+              {subtitleIcon}
+            </span>
+          )}
+          <span
+            style={{
+              fontSize: 12,
+              color: subtitleColor || '#64748B',
+              fontWeight: 500,
+            }}
+          >
+            {subtitle}
+          </span>
+        </div>
+      )}
     </div>
   );
 }

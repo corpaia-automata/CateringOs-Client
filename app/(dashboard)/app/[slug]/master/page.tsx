@@ -609,7 +609,8 @@ function IngredientDrawer({ open, onClose, editing, onSaved }: {
 
 function DishesTab() {
   const router = useRouter();
-  const { slug } = useParams<{ slug: string }>();
+  const params = useParams<{ slug: string }>();
+  const slug = params?.slug ?? '';
   const qc = useQueryClient();
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('All');
@@ -930,7 +931,8 @@ type Tab = 'dishes' | 'ingredients';
 export default function MasterPage() {
   const [tab, setTab] = useState<Tab>('dishes');
   const router = useRouter();
-  const { slug } = useParams<{ slug: string }>();
+  const params = useParams<{ slug: string }>();
+  const slug = params?.slug ?? '';
 
   return (
     <div className="flex flex-col gap-5">

@@ -437,8 +437,8 @@ function EventsPageContent() {
   const [datePreset,    setDatePreset]    = useState<DatePreset>('');
   const [dateFrom,      setDateFrom]      = useState('');
   const [dateTo,        setDateTo]        = useState('');
-  const [statusFilter,  setStatusFilter]  = useState(searchParams.get('status') ?? 'All');
-  const [paymentFilter, setPaymentFilter] = useState(searchParams.get('payment_status') ?? 'All');
+  const [statusFilter,  setStatusFilter]  = useState(searchParams?.get('status') ?? 'All');
+  const [paymentFilter, setPaymentFilter] = useState(searchParams?.get('payment_status') ?? 'All');
   const [serviceFilter, setServiceFilter] = useState('All');
   const [page,          setPage]          = useState(1);
   const [pageSize,      setPageSize]      = useState(10);

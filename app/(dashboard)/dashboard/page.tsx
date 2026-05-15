@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import {
   Users, Calendar, IndianRupee, Clock,
-  TrendingUp, TrendingDown, ChevronDown, FileText, ArrowRight,
+  TrendingUp, ChevronDown, FileText, ArrowRight,
 } from 'lucide-react';
 import {
   LineChart, Line, BarChart, Bar,
@@ -507,8 +507,8 @@ export default function DashboardPage() {
           iconBg="rgba(16,185,129,0.12)"
           iconColor="#10B981"
           href="/leads?filter=this_month"
-          subtitle="+12% from last month"
-          subtitleIcon={<TrendingUp size={13} />}
+          subtitle=""
+          subtitleIcon={null}
           subtitleColor="#10B981"
           loading={leadsLoading}
         />
@@ -519,8 +519,8 @@ export default function DashboardPage() {
           iconBg="rgba(99,102,241,0.12)"
           iconColor="#6366F1"
           href="/events?status=CONFIRMED"
-          subtitle="Next 30 days"
-          subtitleIcon={<TrendingDown size={13} />}
+          subtitle=""
+          subtitleIcon={null}
           subtitleColor="#6366F1"
           loading={eventsLoading}
         />
@@ -531,8 +531,8 @@ export default function DashboardPage() {
           iconBg="rgba(99,102,241,0.10)"
           iconColor="#6366F1"
           href="/reports/revenue"
-          subtitle="Confirmed events"
-          subtitleIcon={<TrendingDown size={13} />}
+          subtitle=""
+          subtitleIcon={null}
           subtitleColor="#6366F1"
           loading={dashLoading}
         />
@@ -543,8 +543,8 @@ export default function DashboardPage() {
           iconBg="rgba(244,63,94,0.10)"
           iconColor="#F43F5E"
           href="/events?payment_status=PENDING"
-          subtitle="3 events overdue"
-          subtitleIcon={<TrendingDown size={13} />}
+          subtitle=""
+          subtitleIcon={null}
           subtitleColor="#F43F5E"
           loading={dashLoading}
         />

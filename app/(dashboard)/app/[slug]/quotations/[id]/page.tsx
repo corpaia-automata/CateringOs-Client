@@ -67,7 +67,9 @@ function StatusBadge({ status }: { status: string }) {
 
 export default function QuotationDetailPage() {
   const router = useRouter();
-  const { slug, id } = useParams<{ slug: string; id: string }>();
+  const params = useParams<{ slug: string; id: string }>();
+  const slug = params?.slug ?? '';
+  const id = params?.id ?? '';
 
   const { data: q, isLoading, isError } = useQuery({
     queryKey: ['quotation', id],
