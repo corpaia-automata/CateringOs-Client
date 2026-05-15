@@ -1,6 +1,11 @@
 'use client';
 
-import { useEffect, type CSSProperties, type ComponentType } from 'react';
+import { type CSSProperties, type ComponentType } from 'react';
+
+import './themes/classic.css';
+import './themes/minimal.css';
+import './themes/premium.css';
+import './themes/print.css';
 
 import type { PublicQuotationResponse } from '@/src/types/quotation';
 
@@ -47,12 +52,15 @@ const FALLBACK_SECTIONS = [
 /**
  * Renders the public quotation using template-driven section order and theme.
  */
+
 export function QuotationRenderer({ data, isPrint = false }: QuotationRendererProps) {
-  useEffect(() => {
-    const templateType = data?.template?.type || 'classic';
-    import(`./themes/${templateType}.css`).catch(() => import('./themes/classic.css'));
-    import('./themes/print.css');
-  }, [data?.template?.type]);
+
+  // useEffect(() => {
+  //   const templateType = data?.template?.type || 'classic';
+  //   import(`./themes/${templateType}.css`).catch(() => import('./themes/classic.css'));
+  //   import('./themes/print.css');
+  // }, [data?.template?.type]);
+
 
   const configuredSections = Array.isArray(data?.template?.sections_config?.sections)
     ? data.template.sections_config.sections

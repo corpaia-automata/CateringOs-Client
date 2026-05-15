@@ -8,7 +8,7 @@ import Providers from './providers';
 import './globals.css';
 
 /** Bump when replacing `public/favicon.png` so browsers pick up the new tab icon. */
-const FAVICON = '/favicon.png?v=2';
+const FAVICON = '/favicon.png';
 
 const inter = Inter({
   variable: '--font-sans',

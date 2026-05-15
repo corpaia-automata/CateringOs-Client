@@ -37,10 +37,10 @@ function LoginPageContent() {
   const [isCollapsed, setIsCollapsed] = useState(false);
 
   useEffect(() => {
-    if (searchParams.get('registered') === '1') {
+    if (searchParams?.get('registered') === '1') {
       setRegistered(true);
     }
-    const prefill = searchParams.get('email');
+    const prefill = searchParams?.get('email');
     if (prefill) {
       setEmail(prefill);
     }
@@ -52,7 +52,7 @@ function LoginPageContent() {
     setLoading(true);
 
     try {
-      const from = searchParams.get('from');
+      const from = searchParams?.get('from');
       const res = await fetch(`${API}/api/auth/login/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

@@ -8,7 +8,7 @@ import { useSubscriptionStore } from '@/store/subscriptionStore';
 function PricingContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const reason = searchParams.get('reason');
+  const reason = searchParams?.get('reason');
   const trialEndDate = useSubscriptionStore((state) => state.trialEndDate);
 
   const formattedEndDate = trialEndDate

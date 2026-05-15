@@ -12,7 +12,7 @@ export default function TrialBanner() {
   const trialDaysLeft = useSubscriptionStore((state) => state.trialDaysLeft);
   const trialEndDate = useSubscriptionStore((state) => state.trialEndDate);
   const isLoggedIn = authStorage.isLoggedIn();
-  const isAuthPage = AUTH_PATHS.some((path) => pathname.startsWith(path));
+  const isAuthPage = AUTH_PATHS.some((path) => pathname?.startsWith(path));
 
   if (!isLoggedIn || isAuthPage || subscriptionStatus !== 'TRIAL') return null;
 
