@@ -14,7 +14,7 @@ export default function RootPage() {
     <main className="bg-[#03060F] overflow-x-hidden">
       <LandingNavbar />
       <LandingHero />
-      <LandingMetrics />
+      {/* <LandingMetrics /> */}
       <LandingModules />
       <LandingDashboard />
       <LandingWorkflow />

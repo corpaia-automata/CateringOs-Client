@@ -6,62 +6,40 @@ import { useInView } from '@/hooks/useInView';
 
 const PLANS = [
   {
-    name: 'Starter',
-    price: '₹2,499',
-    period: '/mo',
-    description: 'Perfect for independent caterers and small teams.',
+    name: 'Free Trial',
+    price: '7 Days',
+    period: 'Free',
+    description:
+      'Explore CateringOS with full platform access before upgrading.',
     features: [
-      'Up to 20 events per month',
+      'Lead management',
       'Quotation builder',
-      'Basic menu planning',
-      'Lead tracking',
-      'Email support',
-      '2 team members',
+      'Event management',
+      'Menu planning',
+      'Basic reports',
+      'CRM access',
     ],
     cta: 'Start Free Trial',
-    href: '/login',
+    href: '/register',
     featured: false,
-    badge: null,
   },
   {
     name: 'Growth',
-    price: '₹5,999',
-    period: '/mo',
-    description: 'For growing catering businesses that need full operations control.',
+    price: '₹2,500',
+    period: '/month',
+    description:
+      'Complete catering operations platform for growing businesses.',
     features: [
       'Unlimited events',
-      'Advanced costing engine',
-      'Full CRM pipeline',
-      'Kitchen workflow module',
-      'Team coordination tools',
-      'Analytics dashboard',
+      'Advanced reports',
+      'Kitchen workflow',
+      'Multi-user access',
       'Priority support',
-      'Up to 10 team members',
+      'Business analytics',
     ],
-    cta: 'Start Free Trial',
-    href: '/login',
+    cta: 'Get Started',
+    href: '/register',
     featured: true,
-    badge: 'Most Popular',
-  },
-  {
-    name: 'Enterprise',
-    price: 'Custom',
-    period: '',
-    description: 'For large operations and multi-location catering businesses.',
-    features: [
-      'Everything in Growth',
-      'Custom integrations',
-      'Dedicated account manager',
-      'White-label options',
-      'SLA guarantee',
-      'Unlimited team members',
-      'Custom onboarding',
-      'API access',
-    ],
-    cta: 'Contact Sales',
-    href: '/login',
-    featured: false,
-    badge: null,
   },
 ];
 
@@ -69,7 +47,7 @@ export default function LandingPricing() {
   const { ref, inView } = useInView();
 
   return (
-    <section id="pricing" className="py-24 lg:py-32 bg-[#03060F]">
+    <section id="pricing" className="py-24 lg:py-32 bg-black">
       <div className="max-w-7xl mx-auto px-5 lg:px-8">
         <div className="text-center mb-14">
           <span className="inline-flex items-center px-3.5 py-1.5 rounded-full border border-white/[0.08] bg-white/[0.04] text-[12px] text-slate-400 mb-5">
@@ -86,7 +64,7 @@ export default function LandingPricing() {
           </p>
         </div>
 
-        <div ref={ref} className="grid grid-cols-1 md:grid-cols-3 gap-5 max-w-5xl mx-auto">
+        <div ref={ref} className="grid grid-cols-1 md:grid-cols-2 gap-5 max-w-5xl mx-auto">
           {PLANS.map(({ name, price, period, description, features, cta, href, featured, badge }, i) => (
             <div
               key={name}

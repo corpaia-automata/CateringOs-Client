@@ -5,7 +5,7 @@ import { ArrowRight, Play, TrendingUp, Calendar } from 'lucide-react';
 
 export default function LandingHero() {
   return (
-    <section className="relative min-h-screen flex flex-col items-center justify-center overflow-hidden bg-[#03060F] pt-24 pb-16">
+    <section className="relative min-h-screen flex flex-col items-center justify-center overflow-hidden bg-black pt-24 pb-16">
       {/* Background atmosphere */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-[-15%] left-1/2 -translate-x-1/2 w-[900px] h-[600px] bg-orange-500/[0.06] rounded-full blur-[140px]" />
@@ -21,15 +21,15 @@ export default function LandingHero() {
       </div>
 
       {/* Badge */}
-      <div className="relative mb-7 inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-orange-500/25 bg-orange-500/[0.07] backdrop-blur-sm">
+      {/* <div className="relative mb-7 inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-orange-500/25 bg-orange-500/[0.07] backdrop-blur-sm">
         <span className="w-1.5 h-1.5 rounded-full bg-orange-400 animate-pulse" />
         <span className="text-[12.5px] text-orange-300 font-medium tracking-wide">
           Trusted by 200+ catering businesses across India
         </span>
-      </div>
+      </div> */}
 
       {/* Headline */}
-      <div className="relative text-center max-w-4xl mx-auto px-5">
+      <div className="relative text-center max-w-6xl mx-auto px-5">
         <h1 className="text-[50px] sm:text-[64px] lg:text-[78px] font-bold leading-[1.05] tracking-[-0.02em] text-white mb-6">
           The Operating System
           <br className="hidden sm:block" />
@@ -52,15 +52,15 @@ export default function LandingHero() {
             Get Started Free
             <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
           </Link>
-          <button className="group inline-flex items-center gap-2.5 px-7 py-3.5 text-white font-medium text-[15px] rounded-xl border border-white/10 hover:border-white/20 bg-white/[0.04] hover:bg-white/[0.07] transition-all duration-200">
+          {/* <button className="group inline-flex items-center gap-2.5 px-7 py-3.5 text-white font-medium text-[15px] rounded-xl border border-white/10 hover:border-white/20 bg-white/[0.04] hover:bg-white/[0.07] transition-all duration-200">
             <span className="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center group-hover:bg-white/15 transition-colors">
               <Play className="w-3 h-3 fill-white text-white ml-0.5" />
             </span>
             Watch Demo
-          </button>
+          </button> */}
         </div>
         <p className="text-[12.5px] text-slate-500">
-          14-day free trial · No credit card required · Setup in minutes
+          7-day free trial · No credit card required · Setup in minutes
         </p>
       </div>
 

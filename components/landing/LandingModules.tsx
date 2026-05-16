@@ -77,7 +77,7 @@ export default function LandingModules() {
   const { ref, inView } = useInView();
 
   return (
-    <section id="modules" className="py-24 lg:py-32 bg-[#03060F]">
+    <section id="modules" className="py-24 lg:py-32 bg-black">
       <div className="max-w-7xl mx-auto px-5 lg:px-8">
         <div className="text-center mb-14">
           <span className="inline-flex items-center px-3.5 py-1.5 rounded-full border border-white/[0.08] bg-white/[0.04] text-[12px] text-slate-400 mb-5">
@@ -91,7 +91,7 @@ export default function LandingModules() {
             </span>
           </h2>
           <p className="text-[16px] lg:text-[18px] text-slate-400 max-w-xl mx-auto">
-            Eight purpose-built modules that connect your entire operation — from first
+            Eight purpose-built modules that connect your entire operations from first
             contact to final delivery.
           </p>
         </div>
