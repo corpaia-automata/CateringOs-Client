@@ -155,7 +155,7 @@ export default function RegisterPage() {
         <div className="w-full" style={{ maxWidth: 400 }}>
           {/* Mobile logo */}
           <div className="flex lg:hidden items-center gap-2 mb-8">
-          <div className="relative w-[520px] h-[120px]">
+          <div className="relative w-[320px] h-[90px]">
             <img
               src="/logos/white-logo.png"
               alt="CateringOS"
